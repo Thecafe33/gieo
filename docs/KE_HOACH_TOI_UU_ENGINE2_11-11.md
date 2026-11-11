@@ -3,7 +3,7 @@
 > Ngày lập: 11/11/2026. Mốc mã đã đọc: `21736d9` (nhánh `Phan-tach-unit-engine`).
 > Đầu vào: [TOM_TAT_UNIT_ENGINE2_POS_QUANLYGIEO2.md](TOM_TAT_UNIT_ENGINE2_POS_QUANLYGIEO2.md), [LO_TRINH_ENGINE2_CAP6.md](LO_TRINH_ENGINE2_CAP6.md), [ENGINE2_POS_V3_05-11.md](ENGINE2_POS_V3_05-11.md) và mã `gieo_engine2_pos_v4.js`, `unit_engine2_store_v4.js`, `functions/automation/engine2.js` + `index.js`, `tools/automation/engine2_ui.js`.
 > **Chỉ là kế hoạch — chưa đổi dòng mã nào.** Trạng thái Engine 2 vẫn chỉ ghi ở lộ trình; tài liệu này là danh sách đề xuất chờ chủ dự án chọn.
-> **Bản lần 3 (11/11) là bản hiện hành:** mục 3–7 — mô hình 10 cửa hàng + hướng «cổng tín hiệu, giữ nguyên cơ chế». Phương án lần 2 (đổi cách đánh thức) chuyển xuống Phụ lục, **không còn là đề xuất chính** vì nó đổi cơ chế của Engine 2.
+> **Bản lần 3 (11/11) là bản hiện hành:** mục 3–8 — mô hình 10 cửa hàng, bốn ưu tiên của chủ dự án, quyết định đã chọn + hướng «cổng tín hiệu, giữ nguyên cơ chế». Phương án lần 2 (đổi cách đánh thức) chuyển xuống Phụ lục, **không còn là đề xuất chính** vì nó đổi cơ chế của Engine 2.
 > Mọi con số bên dưới là **ước lượng từ đọc mã**, chưa đo trên Firebase thật (bước Đ0 là đo).
 
 ## 1. Phạm vi và nguyên tắc
@@ -34,6 +34,7 @@
 | **B1** | Dựng danh sách cân cuối ca | `extendCloseLines` → `ensureCloseTasks`: 1 `config()` + **mỗi món kiểm soát 1 transaction 3 lượt đọc, chạy tuần tự**, lặp lại mỗi lần dựng danh sách dù việc đã có; RT từng món thiếu đọc tuần tự | 10 món kiểm soát ≈ 31 lượt đọc + 10 vòng mạng mỗi lần mở màn kết ca | Nhớ «đã bảo đảm» theo (ngày, món) trong phiên; một transaction cho mọi món còn thiếu; bỏ `config()` (đã có `state` đang nghe); RT đọc song song |
 | **B2** | Ghi từng dòng cân | `engage` cho **mỗi dòng**: truy vấn ca người cân → transaction xin lượt → transaction xếp hàng → đọc lại lượt cân vừa ghi | 4 vòng mạng × số dòng, tuần tự — mạng yếu là chậm kết ca rõ nhất | `requestMeasurement` trả luôn `{id, status, operationId, lastError}` (bỏ lượt đọc lại); nhớ kết quả truy vấn ca của (người, ngày) trong 60 giây (transaction vẫn kiểm lại từng ca); gộp bước xếp hàng vào transaction xin lượt (trigger `_engine2_measurement` vẫn là lưới an toàn) |
 | **B3** | Lấy việc M0 / M3 | `wanted()`: truy vấn 40 việc chờ mới nhất rồi lọc trên máy; phụ thuộc chỉ mục `tasks (pending, createdAt↓)` | Việc loại khác (đối chiếu quy cách, nhóm dễ nhầm…) nhiều thì M0 / M3 trôi khỏi cửa sổ; thiếu chỉ mục → Engine 2 không nhận lượt nào | Lượt học công bố sẵn danh sách M0 hôm nay + M3 đang mở lên tài liệu POS đã nghe (như `controlledItemIds`) → **0 lượt đọc**, hết phụ thuộc chỉ mục. Việc `resync` tạo trong ngày vẫn cần đường truy vấn dự phòng |
+| **B5** | Chờ Engine 2 lúc ghi số cân | `engage` không có trần thời gian — mạng treo thì bước ghi dòng cân treo theo | Trái ưu tiên «nhân viên không chờ vô nghĩa» | Trần thời gian cho cả lần kết ca (đề xuất 4 giây); quá trần → POS tự ghi, mã lý do `request_failed` (cơ chế sẵn có) |
 | B4 | Người kết ca hôm trước | `previousCloser`: tới 7 truy vấn ca theo ngày, chỉ nhớ trong bộ nhớ trang; chạy cả khi Engine 2 tắt | Tải lại trang là đọc lại | Nhớ theo ngày ở `localStorage`; dừng ở ngày đầu tiên có ca (đã làm) |
 
 ### Không đề xuất đổi
@@ -101,24 +102,51 @@ Một giờ không có đơn ở cả 10 quán: 4 nhịp × ~5 lượt đọc = 
 - **Bản lần 2 (Phụ lục): có, ở ba chỗ** — «hỏi–đáp» thay cơ chế dấu còn sống; học lúc đóng ngày thay 00:xx; xét hạn «lười» làm thông báo tới trễ. Vì vậy đã rút khỏi đề xuất chính.
 - Engine 2 bản hiện tại đã đủ thông minh ở phần **quyết định**. Chỗ chưa thông minh là phần **hạ tầng quanh nó** (nhịp, hàng đợi, đọc lặp) — kế hoạch này chỉ đụng phần đó.
 
-## 6. Thứ tự thực hiện
+## 6. Bốn ưu tiên của chủ dự án (11/11) → luật thiết kế của kế hoạch này
 
-| Đợt | Nội dung | File chạm | Deploy |
-|---|---|---|---|
-| **Đ0 — đo** | Dựng mô phỏng 10 quán trên Firebase giả theo đúng giả định mục 3, đếm đọc / ghi / lần gọi từng nhóm việc → thay bảng ước lượng bằng số đo. Chủ dự án gửi số thật của gg01 (Firebase Console › Usage, số lần gọi function) để đối chiếu | `tests/`, `tools/automation/` | không |
-| **Đ1 — cổng ở worker** | G1, G2, G3, G4 + A3, A4 | `unit_engine2_store_v5.js` (+ shared), `functions/automation/engine2.js`, `index.js`, `worker.js`, `queue.js` | Functions + chỉ mục nhóm. **Không đụng POS** |
-| **Đ2 — POS v5** | B1, B2, B3, B4; đọc dấu còn sống ở cả hai nơi | `gieo_engine2_pos_v5.js`, posgieo trỏ store v5 | Hosting |
-| **Đ3 — dọn** | G6 khi mọi máy ≥ v5; A5, A6, A7 nếu số đo cho thấy đáng | store v5 / v6 | Functions + chỉ mục |
+Chủ dự án giao: «cái nào hợp lý thì tối ưu, đừng hỏi ngược lại». Mọi mục trong kế hoạch đã được soi qua bốn ưu tiên dưới đây; mục nào vi phạm thì bỏ.
 
-Cửa mỗi đợt: `sh tools/sinh_lai_tat_ca.sh` giữ mốc 6 FAIL có sẵn; bộ test store v4 / POS v4 chạy lại nguyên trên v5; test «hai thế giới» (v4 và v5 cùng dữ liệu 10 quán × 7 ngày → hồ sơ, phân bổ, mức kiểm soát, mô hình học **giống hệt**); số đo Đ0 giảm như dự kiến; `check_boundaries` + `check_paths` sạch.
+| Ưu tiên | Luật thiết kế | Kế hoạch này tuân thủ thế nào |
+|---|---|---|
+| **1. Bán hàng trước hết** — không đổi luồng bán, khách / nhân viên không chờ vô nghĩa | Không thêm lượt đọc, lượt ghi hay `await` nào vào đường bán (giỏ → thanh toán → in). Engine 2 chỉ chạy ở máy chủ, sau khi bill đã xong | Không mục nào chạm đường bán. Cầu nối POS chỉ bọc danh sách cân và bước ghi số cân (giữ nguyên). Thêm test khoá: bán một bill khi Engine 2 bật / tắt → số lượt đọc và thời gian như nhau |
+| **2. Thời gian của nhân viên** — một việc chỉ làm một lần, dù phục vụ nhiều tín hiệu | «Một lần cân, nhiều nơi dùng»: món đã có trong danh sách thì chỉ gắn dấu ngầm; cân ngẫu nhiên ưu tiên món vốn phải cân; cân độc lập = chính số cân của người nhận ca (đang làm vậy — giữ). Máy không được bắt người chờ mạng | B1 + B2 rút vòng mạng lúc kết ca từ ~4 × số dòng xuống ~1 cho cả danh sách. **Thêm B5:** phần xin lượt của Engine 2 có **trần thời gian** (đề xuất 4 giây cho cả lần kết ca) — quá trần thì POS tự ghi như cơ chế «không chắc → POS ghi» sẵn có (mã lý do `request_failed`), nhân viên không bao giờ đứng chờ Engine 2. Việc trùng: mã việc cố định theo (ngày, món) nên hai tín hiệu cùng đòi cân một món vẫn là **một** dòng |
+| **3. Không có luồng riêng cho Engine 2** | Mọi việc Engine 2 cần phải là **một dòng trong danh sách sẵn có** (cân đầu ca / cuối ca). Không màn mới, không popup, không bước mới | Kế hoạch không thêm màn / bước nào. Việc chẩn đoán dạng nhập riêng (kiểm bì, tỷ trọng, đối chiếu nhãn…) **tiếp tục tắt** cho tới khi có chỗ nằm trong danh sách cân — không bật trong kế hoạch này |
+| **4. Không giải thích cho nhân viên** | Không thêm chữ, lý do, nhãn nào lên POS; dòng Engine 2 trông y như dòng thường | Giữ nguyên việc ẩn «Cần cân hôm nay vì…». Mọi lý do (kể cả B5 quá trần thời gian) chỉ hiện ở quanlygieo2 cho quản lý |
 
-## 7. Cần chủ dự án quyết trước khi code
+## 7. Quyết định đã chọn (thay cho các câu hỏi ở bản trước)
 
-1. Hướng «cổng tín hiệu, giữ nguyên cơ chế» (mục 4) có đúng ý không? Nhịp 15 phút vẫn tồn tại nhưng chỉ làm người gác (~5 lượt đọc cho cả chuỗi mỗi nhịp).
-2. Đ1 đụng cả `worker.js` / `queue.js` của worker tự động hoá (dùng chung nhịp) — đồng ý, hay chỉ làm phần Engine 2 (khi đó tiết kiệm ít hơn: `tickStore` chiếm ~60% phần lãng phí)?
-3. G4: sau ngày quán nghỉ, lượt học chạy lúc vào ca đầu tiên thay vì 00:xx — đồng ý?
-4. Chỉ mục phạm vi nhóm cho G1 (và chỉ mục cho A1(4), A5) — chủ dự án tự deploy.
-5. Giả định mục 3 (7 dòng cân, 150 bill, 1–2 máy / quán) có sát thực tế các quán sắp mở không?
+| Việc | Chọn | Vì sao |
+|---|---|---|
+| Hướng chung | **Cổng tín hiệu, giữ nguyên cơ chế** (mục 4). Phương án phụ lục không làm | Không đổi luật, không đổi cách POS ↔ worker tin nhau |
+| Nhịp 15 phút | **Giữ làm người gác cổng**, không gỡ | Gỡ hẳn cần hạ tầng mới + đổi cơ chế; gác cổng chỉ ~1 lượt đọc / nhịp cho cả chuỗi |
+| Cách làm G1 | **Một tài liệu «bảng tín hiệu chuỗi»** (mỗi quán: có việc hẹn tới giờ nào, đang có ca không, hôm qua có hoạt động không) — worker ghi khi trạng thái **đổi** (việc lỗi được hẹn lại, vào / ra ca). Không dùng truy vấn nhóm | Không cần chỉ mục mới, không đụng collection trùng tên của XOFA / TC33. Thêm lưới an toàn: **mỗi giờ một lần** vẫn hỏi từng quán như cũ để bắt việc thất lạc (trường hợp hiếm này chờ tối đa 1 giờ thay vì 15 phút — khác biệt duy nhất về thời gian, chỉ ở đường lỗi) |
+| Phạm vi worker | Làm **cả** phần worker tự động hoá dùng chung nhịp (`worker.js`, `queue.js`) nhưng ở đợt riêng, sau phần Engine 2 | Chiếm ~60% phần lãng phí; tách đợt để lỗi (nếu có) không lẫn |
+| Lượt học sau ngày nghỉ | Chạy bù ở tín hiệu vào ca đầu tiên | Kịp trước lúc cân cuối ca; ngày nghỉ không tạo việc cân không ai làm |
+| Việc M0 / M3 cho POS | Lượt học **công bố sẵn** lên tài liệu POS đang nghe; POS v5 vẫn giữ truy vấn cũ làm dự phòng | 0 lượt đọc, hết phụ thuộc chỉ mục, bớt chờ lúc mở màn kết ca |
+| Mục cần chỉ mục mới (A1-4, A5) | **Hoãn**, chỉ làm nếu số đo cho thấy đáng | Tránh việc chủ dự án phải deploy chỉ mục cho lợi ích chưa rõ |
+| A6, A7, S1, S4, S5 | **Không làm** | Lợi nhỏ hoặc đổi kết quả |
+| Giả định 10 quán | Dùng tạm; Đ0 đo lại và sửa bảng | — |
+
+## 8. Thứ tự thực hiện (xếp theo bốn ưu tiên)
+
+| Đợt | Phục vụ ưu tiên | Nội dung | File chạm | Deploy |
+|---|---|---|---|---|
+| **Đ0 — đo** | — | Mô phỏng 10 quán × 7 ngày trên Firebase giả: đếm đọc / ghi / lần gọi từng nhóm việc; đo số vòng mạng và thời gian một lần kết ca 10 dòng (mạng thường / mạng chậm giả lập); test khoá «bán một bill không tốn thêm gì» | `tests/`, `tools/automation/` | không |
+| **Đ1 — POS: kết ca nhanh** | 2 (và 1, 3, 4 giữ nguyên) | B1, B2 (gộp xin lượt), B4, **B5 trần thời gian**, đọc danh sách M0 / M3 công bố sẵn (dự phòng truy vấn cũ) | `gieo_engine2_pos_v5.js`, `unit_engine2_store_v5.js`, posgieo trỏ sang; v4 giữ quay lui | Hosting |
+| **Đ2 — worker Engine 2: cổng tín hiệu** | chi phí | Bảng tín hiệu chuỗi (G1), dấu còn sống chỉ khi có ca (G3), mốc học bền + học theo hoạt động (G4, A1), bớt đọc lặp (A3, A4), công bố M0 / M3 | store v5 (shared), `functions/automation/engine2.js`, `index.js` | Functions |
+| **Đ3 — worker tự động hoá: cùng cổng** | chi phí | G1 + G2 cho `queue.retryDue` và `worker.tickStore` | `queue.js`, `worker.js`, `index.js` | Functions |
+| **Đ4 — dọn** | chi phí | Dấu còn sống rời tài liệu điều khiển (G6) khi mọi máy ≥ v5; A5 nếu đáng | store v5 / v6 | Functions |
+
+Thứ tự deploy an toàn cả hai chiều như gói v3: POS v5 chạy được với worker v4 (chưa có danh sách công bố → dùng truy vấn cũ), worker mới chạy được với POS v4 (dấu còn sống vẫn < 45 phút suốt lúc có ca).
+
+**Cửa nghiệm thu mỗi đợt**
+1. `sh tools/sinh_lai_tat_ca.sh` giữ mốc 6 FAIL có sẵn; `check_boundaries` + `check_paths` sạch.
+2. Bộ test store v4 / POS v4 chạy lại nguyên trên v5.
+3. Test «hai thế giới» (v4 và v5, cùng dữ liệu 10 quán × 7 ngày): hồ sơ, phân bổ, mức kiểm soát, việc cân, mô hình học **giống hệt**.
+4. Bốn ưu tiên thành test: (1) bán một bill — lượt đọc / thời gian không đổi; (2) danh sách cân không có món trùng, một lần cân phục vụ mọi tín hiệu, kết ca không chờ quá trần khi mạng treo; (3) không có phần tử giao diện mới ở POS; (4) HTML dòng cân của Engine 2 giống hệt dòng thường.
+5. Số đo Đ0 giảm như dự kiến.
+
+**Bước kế tiếp:** kế hoạch đã đủ quyết định để code. Khi chủ dự án bảo bắt đầu, làm Đ0 trước (chỉ thêm test / công cụ đo, không đổi app), rồi Đ1.
 
 ## Phụ lục — phương án lần 2: đánh thức hoàn toàn theo tín hiệu (ĐỂ DÀNH, không làm trong kế hoạch này)
 
