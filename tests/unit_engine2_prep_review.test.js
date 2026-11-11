@@ -112,7 +112,7 @@ const alerts=f=>Object.entries(f.FS).filter(([k])=>k.startsWith('alerts_gieogieo
   console.log('ok Quét bù + hàng đợi: chỉ dòng đối chiếu mẻ từ ngày áp dụng');}
 
  // Worker: trigger khi POS gắn cờ.
- {const src=fs.readFileSync(path.join(__dirname,'../functions/automation/engine2.js'),'utf8');assert.match(src,/E\.PREP_ROW\.test\(id\)&&after\?\.needsReview===true&&before\?\.needsReview!==true/);assert.match(src,/sweepPrepReview\(\)/);
+ {const src=fs.readFileSync(path.join(__dirname,'../functions/automation/engine2.js'),'utf8');assert.match(src,/E\.PREP_ROW\.test\(id\)&&after\?\.needsReview===true&&before\?\.needsReview!==true/);assert.match(src,/sweepPrepReview\(/);
   console.log('ok Worker: xếp việc khi dòng mới cần duyệt + quét bù mỗi ngày');}
  console.log('ALL PASS');
 })().catch(e=>{console.error(e);process.exit(1)});

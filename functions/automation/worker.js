@@ -228,6 +228,20 @@ function createWorker(db,opts={}){
   await progress(store,cfg,{enabled:true,mode:cfg.mode==='active'&&cfg.fleet20Confirmed===true?'active':'shadow',heartbeatAt:new Date(now()).toISOString(),lastError:''});
   }finally{await db.runTransaction(async tx=>{const snap=await tx.get(ref);if(snap.exists&&snap.data().leaseToken===token)tx.set(ref,{leaseUntil:0,leaseToken:''},{merge:true});});}
  }
- return {processSource,bootstrap,tickStore,markDay,buildDay,reconcileCounts,migrateErrors};
+ // [v5 — cổng tín hiệu] Việc theo giờ của quán còn lại sau một lần kiểm: {enabled, nextDue} — nextDue = hồ sơ có nextCheckAt sớm nhất
+ // (chỉ khi chạy thật), ngày còn dirty / chưa sẵn sàng / còn lỗi nguồn → kiểm lại ngay nhịp sau. 0 = không có việc hẹn.
+ async function due(store){
+  const [cfgSnap,sum]=await Promise.all([db.doc(configPath(store)).get(),db.doc(rootPath(store)).get()]);
+  const cfg=cfgSnap.exists?cfgSnap.data():{};if(!cfg.enabled)return {enabled:false,nextDue:0};
+  const st=sum.exists?sum.data():{};
+  if(!st.ready||st.bootstrapPolicyVersion!==A.VERSION||Number(st.sourceErrorCount)>0||st.errorStateVersion!==1||st.countsVerifiedVersion!==A.VERSION)return {enabled:true,nextDue:1};
+  const dirty=await db.collection(rootPath(store)+'/days').where('dirty','==',true).limit(1).get();if(dirty.docs.length)return {enabled:true,nextDue:1};
+  if(!(cfg.mode==='active'&&cfg.fleet20Confirmed===true))return {enabled:true,nextDue:0};
+  const c=await db.collection(rootPath(store)+'/cases').where('nextCheckAt','>',0).orderBy('nextCheckAt').limit(1).get();
+  return {enabled:true,nextDue:c.docs.length?Number(c.docs[0].data().nextCheckAt)||1:0};
+ }
+ // Dấu «còn sống» ghi mù khi nhịp không có việc cho quán (POS / quanlygieo2 đòi dấu < 60 phút). Chưa có tài liệu → bỏ qua.
+ async function beat(store){try{await db.doc(rootPath(store)).update({heartbeatAt:new Date(now()).toISOString()});return true;}catch(e){if(e&&(e.code===5||e.code==='not-found'||/NOT_FOUND|No document/i.test(e.message||'')))return false;throw e;}}
+ return {processSource,bootstrap,tickStore,markDay,buildDay,reconcileCounts,migrateErrors,due,beat};
 }
 module.exports={createWorker,rootPath,configPath,key,BOOTSTRAP};

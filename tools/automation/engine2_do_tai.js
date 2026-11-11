@@ -3,7 +3,7 @@
  * Chạy mã THẬT (worker functions/automation, store Engine 2, cầu nối POS, kho v21) trên Firebase giả và đếm như Firestore tính phí:
  *   đọc một tài liệu = 1 · truy vấn = số tài liệu trả về (tối thiểu 1) · count() = 1 / 1000 dòng · gồm cả t.get() trong transaction.
  *   ghi = mỗi set / update / delete (kể cả trong transaction, batch). vòng mạng = mỗi get / transaction / lần ghi lẻ / batch.commit.
- * Dùng:  node tools/automation/engine2_do_tai.js [--pos v4] [--store v4] [--quan 10] [--json]
+ * Dùng:  node tools/automation/engine2_do_tai.js [--pos v4] [--store v4] [--nhip cu] [--quan 10] [--json]   (--nhip cu: nhịp kiểu trước, mỗi quán mỗi nhịp)
  * Bản mới (v5…) đo bằng cùng công cụ: --pos v5 --store v5 → so hai bảng. */
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 const ROOT_DIR=path.join(__dirname,'../..');
@@ -14,6 +14,7 @@ const {createWorker,rootPath,configPath}=require(path.join(ROOT_DIR,'functions/a
 const {createQueue}=require(path.join(ROOT_DIR,'functions/automation/queue'));
 const {createEngine2Worker}=require(path.join(ROOT_DIR,'functions/automation/engine2'));
 const A=require(path.join(ROOT_DIR,'functions/automation/shared/gieo_automation.v3'));
+let Clock=null;try{Clock=require(path.join(ROOT_DIR,'functions/automation/clock'));}catch(e){}   // bản có «cổng tín hiệu»
 const STORE='gg01',ROOT=E.rootPath(STORE),DAY='2026-10-22';
 const clone=v=>JSON.parse(JSON.stringify(v));
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
@@ -71,18 +72,28 @@ function workers(f,db,now){
 
 // ── 1. Một ngày 96 nhịp đồng hồ, KHÔNG có việc gì (index.js › gieoAutomationClock) ─────────────────────────
 // lanh=true: mỗi nhịp một instance mới (bộ nhớ «hôm nay đã học» mất) — trường hợp khởi động lạnh.
-async function nhip({lanh=false}={}){
- const {f}=world(),m=meter(f);let now=Date.parse(DAY+'T10:00:00+07:00'),w=workers(f,m.fs,()=>now);
- const parts={engine2:ZERO,queue:ZERO,tickStore:ZERO},ticks=[];
+// cong=true: nhịp đi qua «cổng tín hiệu» (clock.js) — quán có ca 07:00–22:00 (tín hiệu vào / ra ca), không có việc nào khác.
+async function nhip({lanh=false,cong=false}={}){
+ const {f}=world(),m=meter(f);let now=Date.parse(DAY+'T00:05:00+07:00'),w=workers(f,m.fs,()=>now);
+ const parts={engine2:ZERO,queue:ZERO,tickStore:ZERO},ticks=[];let vao=0;
+ const mkClock=()=>Clock.createClock({db:m.fs,stores:[STORE],engine2:w.engine2,queue:w.queue,worker:w.worker,rootPath,now:()=>now,log:()=>{}});
+ let clock=cong?mkClock():null;
+ const shift={employeeId:'b',employeeName:'B',roles:['barista'],businessDate:DAY,checkedInAt:DAY+'T00:00:00.000Z'};
  for(let i=0;i<96;i++,now+=15*60000){
-  if(lanh)w=workers(f,m.fs,()=>now);
+  if(lanh){w=workers(f,m.fs,()=>now);if(cong)clock=mkClock();}
   const t0=m.snap();
-  for(const [name,run] of [['engine2',()=>w.engine2.tick(STORE)],['queue',()=>w.queue.retryDue(STORE)],['tickStore',()=>w.worker.tickStore(STORE)]]){const s=m.snap();await run();parts[name]=add(parts[name],m.since(s));}
+  if(cong){
+   const gio=new Date(now+7*3600000).getUTCHours(),phut=new Date(now+7*3600000).getUTCMinutes();
+   if(gio===7&&phut<15){f.FS['employee_shifts_gieogieo/sb']=shift;await clock.shiftSignal(STORE,null,shift);}
+   if(gio===22&&phut<15){const out={...shift,checkedOutAt:new Date(now).toISOString()};f.FS['employee_shifts_gieogieo/sb']=out;await clock.shiftSignal(STORE,shift,out);}
+   const r=await clock.run();if(r[STORE].ran)vao++;
+   if(i===0)await clock.fleet.patch(STORE,{openUntil:0});   // ngày thường (không phải ngày đầu sau deploy): quán đóng tới khi có tín hiệu vào ca
+  }else for(const [name,run] of [['engine2',()=>w.engine2.tick(STORE)],['queue',()=>w.queue.retryDue(STORE)],['tickStore',()=>w.worker.tickStore(STORE)]]){const s=m.snap();await run();parts[name]=add(parts[name],m.since(s));}
   ticks.push(m.since(t0));
  }
  const sorted=[...ticks].sort((a,b)=>a.reads-b.reads),hoc=sorted.at(-1),thuong=sorted[Math.floor(sorted.length/2)];
  const heartbeats=f.log.filter(x=>WRITE.test(x[0])&&x[1]===ROOT).length;
- return {tong:ticks.reduce(add,ZERO),nhipThuong:thuong,nhipHoc:hoc,parts,ghiLenTaiLieuDieuKhien:heartbeats};
+ return {tong:ticks.reduce(add,ZERO),nhipThuong:thuong,nhipHoc:hoc,parts,ghiLenTaiLieuDieuKhien:heartbeats,soNhipVaoQuan:cong?vao:96};
 }
 
 // ── 2. Kết ca ở POS (cầu nối thật + kho thật) + worker hoàn tất các lượt cân ────────────────────────────────
@@ -105,7 +116,7 @@ async function ketCa({pos='v4',store='v4'}={}){
  const base=[...must,...ctl.slice(0,2)].map(id=>g.shiftWeighTemLinePOS(items.find(x=>x.id===id),f.rtGet('active_units_gieogieo/'+id),[]));
  g.computeShiftInventoryCountLinesPOS=async()=>clone(base);
  delete g.GieoEngine2POS;vm.runInThisContext(SRC);
- await g.computeShiftInventoryCountLinesPOS('close');await sleep(40);        // khởi tạo + nhận cấu hình (không tính)
+ await g.computeShiftInventoryCountLinesPOS('khoi_tao');await sleep(40);     // chỉ khởi tạo + nhận cấu hình (pha lạ → cầu nối không dựng gì, không tính)
  const out={};
  // (a) mở màn kết ca: dựng danh sách
  let s=mp.snap();const lines=await g.computeShiftInventoryCountLinesPOS('close');out.dungDanhSach=mp.since(s);
@@ -162,23 +173,27 @@ async function tinHieu(){
 
 // ── Tổng hợp theo giả định mục 3: mỗi quán / ngày ───────────────────────────────────────────────────────────
 async function run(opts={}){
- const [am,lanh,kc,th]=[await nhip(),await nhip({lanh:true}),await ketCa(opts),await tinHieu()];
+ const cong=opts.cong!==undefined?!!opts.cong:!!Clock;
+ const [am,lanh,kc,th]=[await nhip({cong}),await nhip({lanh:true,cong}),await ketCa(opts),await tinHieu()];
  const mayPos=opts.mayPos||1.5,quan=opts.quan||10;
- const khongViec={reads:am.nhipThuong.reads*96+am.ghiLenTaiLieuDieuKhien*mayPos,writes:am.nhipThuong.writes*96,trips:am.nhipThuong.trips*96};
  const hoc={reads:am.nhipHoc.reads-am.nhipThuong.reads,writes:am.nhipHoc.writes-am.nhipThuong.writes,trips:am.nhipHoc.trips-am.nhipThuong.trips};
+ // «Không có việc» = cả ngày nhịp trừ lượt học + máy POS đang nghe đọc lại mỗi lần tài liệu điều khiển bị ghi (dấu còn sống).
+ const khongViec={reads:am.tong.reads-hoc.reads+am.ghiLenTaiLieuDieuKhien*mayPos,writes:am.tong.writes-hoc.writes,trips:am.tong.trips-hoc.trips};
  const coViec=[kc.posTong,kc.workerHoanTat,th.baoHet,{reads:th.doiCa.reads*3,writes:th.doiCa.writes*3,trips:th.doiCa.trips*3},hoc].reduce(add,ZERO);
  const tong=add(khongViec,coViec),x=(o,n)=>({reads:Math.round(o.reads*n),writes:Math.round(o.writes*n)});
- return {phienBan:{pos:opts.pos||'v4',store:opts.store||'v4'},nhipAm:am,nhipLanh:lanh,ketCa:kc,tinHieu:th,
+ return {phienBan:{pos:opts.pos||'v4',store:opts.store||'v4',nhip:cong?'cổng tín hiệu':'mỗi quán mỗi nhịp'},nhipAm:am,nhipLanh:lanh,ketCa:kc,tinHieu:th,
   motQuanMotNgay:{khongViec,coViec,tong,tiLeKhongViec:{reads:khongViec.reads/tong.reads,writes:khongViec.writes/tong.writes}},
-  chuoi:{quan,ngay:x(tong,quan),thang:x(tong,quan*30),khongViecNgay:x(khongViec,quan),lanhNgay:x(lanh.tong,quan)}};
+  // Cổng tín hiệu: mỗi nhịp đọc MỘT bảng tín hiệu cho cả chuỗi (96 lượt / ngày) — không nhân theo số quán.
+  chuoi:(()=>{const chung=cong?96:0,ch=(o,n)=>({reads:Math.round((o.reads-chung)*n+chung),writes:Math.round(o.writes*n)});
+   return {quan,ngay:ch(tong,quan),thang:x(ch(tong,quan),30),khongViecNgay:ch(khongViec,quan),lanhNgay:ch(lanh.tong,quan)};})()};
 }
 function report(r){
  const f=o=>String(Math.round(o.reads)).padStart(6)+' đọc '+String(Math.round(o.writes)).padStart(5)+' ghi'+(o.trips!=null?String(Math.round(o.trips*10)/10).padStart(7)+' vòng mạng':'');
  const L=[];
- L.push('ĐO TẢI ENGINE 2 — cầu nối POS '+r.phienBan.pos+', store '+r.phienBan.store+' (Firebase giả, mã thật)');
+ L.push('ĐO TẢI ENGINE 2 — cầu nối POS '+r.phienBan.pos+', store '+r.phienBan.store+', nhịp: '+r.phienBan.nhip+' (Firebase giả, mã thật)');
  L.push('');L.push('1. Nhịp 15 phút, KHÔNG có việc (một quán)');
- L.push('   một nhịp thường           '+f(r.nhipAm.nhipThuong));
- for(const [k,v] of Object.entries(r.nhipAm.parts))L.push('   cả ngày · '+k.padEnd(15)+f(v));
+ L.push('   một nhịp thường           '+f(r.nhipAm.nhipThuong)+'   · số nhịp phải vào quán: '+r.nhipAm.soNhipVaoQuan+' / 96');
+ for(const [k,v] of Object.entries(r.nhipAm.parts))if(v.reads||v.writes)L.push('   cả ngày · '+k.padEnd(15)+f(v));
  L.push('   cả ngày 96 nhịp (ấm)      '+f(r.nhipAm.tong)+'   ← gồm 1 lượt học');
  L.push('   cả ngày 96 nhịp (LẠNH)    '+f(r.nhipLanh.tong)+'   ← mỗi nhịp một instance mới');
  L.push('   ghi lên tài liệu điều khiển (đánh thức trigger thiết lập + máy POS đang nghe): '+r.nhipAm.ghiLenTaiLieuDieuKhien+' lần / ngày');
@@ -208,5 +223,5 @@ function report(r){
 module.exports={run,report,nhip,ketCa,tinHieu,world,meter};
 if(require.main===module){
  const arg=k=>{const i=process.argv.indexOf('--'+k);return i>0?process.argv[i+1]:undefined;};
- run({pos:arg('pos'),store:arg('store'),quan:Number(arg('quan'))||10}).then(r=>{console.log(process.argv.includes('--json')?JSON.stringify(r,null,1):report(r));}).catch(e=>{console.error(e);process.exit(1);});
+ run({pos:arg('pos'),store:arg('store'),quan:Number(arg('quan'))||10,cong:arg('nhip')==='cu'?false:undefined}).then(r=>{console.log(process.argv.includes('--json')?JSON.stringify(r,null,1):report(r));}).catch(e=>{console.error(e);process.exit(1);});
 }

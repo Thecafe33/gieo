@@ -41,7 +41,7 @@ const Engine2QL=(()=>{
   return '<section class="auto-case"><h3>4. POS tự ghi — Engine 2 không nhận lượt cân</h3>'+(rows.map(r=>'<p><b>'+esc(r.itemName||r.itemId)+'</b> · '+esc(FALLBACK[r.code]||r.code)+(r.detail?' · '+esc(r.detail):'')+'<br><small>'+esc(qlFmtDT(r.at))+(r.byName?' · '+esc(r.byName):'')+(r.sampling==='random_m0'?' · cân ngẫu nhiên':'')+'</small></p>').join('')||'<p>Chưa có lượt nào.</p>')+'<p>Kho vẫn ghi đúng theo số cân của POS; việc Engine 2 đã đóng kèm lý do (không lặp lại).</p></section>';
  }
  // [v4 05/11] Phiên bản cầu nối từng máy (xác nhận v4 ghi bridgeVersion; bản cũ không ghi) + cảnh báo máy chạy bản cũ trong 7 ngày.
- const BRIDGE_NOW=4;
+ const BRIDGE_NOW=5;
  const bridgeLabel=d=>Number(d.bridgeVersion)>=BRIDGE_NOW?'cầu nối v'+Number(d.bridgeVersion):'<b style="color:var(--danger,#c32c40)">cầu nối cũ'+(d.bridgeVersion?' v'+Number(d.bridgeVersion):'')+'</b>';
  function fleetWarnHTML(list){
   const old=list.filter(d=>Date.now()-Date.parse(d.ackedAt||'')<7*86400000&&!(Number(d.bridgeVersion)>=BRIDGE_NOW));

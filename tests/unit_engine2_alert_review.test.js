@@ -83,7 +83,7 @@ const A=(f,id='al1')=>f.FS['alerts_gieogieo/'+id];
   await g.s.drain(E.key('alert_review','shift_weigh_large_dev_op1'));assert.equal(A(g,'shift_weigh_large_dev_op1').fyi,true);assert.equal(A(g,'shift_weigh_large_dev_op1').status,'new');
   console.log('ok Giao ca NL ≤ 25% đóng / > 25% để biết; cân cuối ca lệch lớn → để biết sau khi vụ lệch NL chốt');}
  const src=require('node:fs').readFileSync(require('node:path').join(__dirname,'../functions/automation/engine2.js'),'utf8');
- assert.match(src,/'handover_variance','shift_weigh_large_deviation'\]\.includes\(after\?\.type\)\)await service\(store\)\.enqueue\('alert_review',id\)/);assert.match(src,/alertsForCase\(/);assert.match(src,/sweepAlerts\(\)/);
+ assert.match(src,/'handover_variance','shift_weigh_large_deviation'\]\.includes\(after\?\.type\)\)await service\(store\)\.enqueue\('alert_review',id\)/);assert.match(src,/alertsForCase\(/);assert.match(src,/sweepAlerts\(/);
  console.log('ok Worker: thông báo mới / vụ lệch đổi trạng thái / quét hằng ngày');
  console.log('ALL PASS');
 })().catch(e=>{console.error(e);process.exit(1)});

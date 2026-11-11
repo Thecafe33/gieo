@@ -2,7 +2,7 @@
 const A=require('./shared/gieo_automation.v3');
 const {key,rootPath,configPath}=require('./worker');
 const {readError,writeError,setError}=require('./errors');
-function createQueue(db,worker,{now=Date.now}={}){
+function createQueue(db,worker,{now=Date.now,onDue}={}){
  const path=store=>rootPath(store)+'/jobs';
  async function enqueue(store,kind,id,before,after,force=false){
   if(!A.kinds.includes(kind)||(!force&&!A.relevant(kind,before,after)))return {queued:false};
@@ -44,6 +44,7 @@ function createQueue(db,worker,{now=Date.now}={}){
     const root=db.doc(rootPath(store)),error=await readError(tx,root,ref.path),sum=await tx.get(root);
     tx.update(ref,{leaseUntil:0,leaseToken:'',nextTryAt:now()+60000,lastError:String(e.message||e)});
     writeError(tx,error,sum.exists?sum.data():{},String(e.message||e),new Date(now()).toISOString());});
+   if(onDue)try{await onDue(store);}catch(x){}   // [v5] việc lỗi được hẹn thử lại → báo nhịp đồng hồ
    throw e;
   }
  }
@@ -61,6 +62,8 @@ function createQueue(db,worker,{now=Date.now}={}){
    if(job.queued)try{await drain(store,job.id);}catch(e){/* drain records its own fenced job error; do not count it as another enqueue failure. */}
   }
  }
- return {enqueue,drain,retryDue,recordEnqueueError,retrySourceErrors};
+ // [v5] Giờ sớm nhất còn việc trong hàng (0 = hàng trống). Một truy vấn giới hạn 1.
+ async function nextDue(store){const s=await db.collection(path(store)).where('dirty','==',true).orderBy('nextTryAt').limit(1).get();return s.docs.length?Math.max(Number(s.docs[0].data().nextTryAt)||0,Number(s.docs[0].data().leaseUntil)||0,1):0;}
+ return {enqueue,drain,retryDue,nextDue,recordEnqueueError,retrySourceErrors};
 }
 module.exports={createQueue};

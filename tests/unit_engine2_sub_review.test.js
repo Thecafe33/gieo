@@ -68,7 +68,7 @@ const R=f=>f.FS['prep_shortage_recons_gieogieo/'+RID],A=f=>f.FS['alerts_gieogieo
 
  // Quét bù + worker.
  {const f=fx(base());assert.equal(await f.s.sweepSubReviews(),1);await f.s.drain(E.key('sub_review',RID));assert.equal(R(f).status,'substitution_confirmed');
-  const src=fs.readFileSync(path.join(__dirname,'../functions/automation/engine2.js'),'utf8');assert.match(src,/after\?\.type==='prep_shortage_recon'[\s\S]*enqueue\('sub_review',after\.reconId\)/);assert.match(src,/sweepSubReviews\(\)/);
+  const src=fs.readFileSync(path.join(__dirname,'../functions/automation/engine2.js'),'utf8');assert.match(src,/after\?\.type==='prep_shortage_recon'[\s\S]*enqueue\('sub_review',after\.reconId\)/);assert.match(src,/sweepSubReviews\(/);
   console.log('ok Quét bù + hàng đợi + worker');}
  console.log('ALL PASS');
 })().catch(e=>{console.error(e);process.exit(1)});

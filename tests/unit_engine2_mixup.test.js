@@ -135,7 +135,7 @@ const base=()=>Object.fromEntries([dcase('c_sg','sg',320),dcase('c_ts','ts',-310
 
  // Worker: vụ lệch mới tạo → xét pha nhầm cho ngày đó; lượt ngày quét quá hạn.
  const src=fs.readFileSync(path.join(__dirname,'../functions/automation/engine2.js'),'utf8');
- assert.match(src,/kind==='duty_cases'[\s\S]*enqueue\('mixup_day',after\.businessDate\)/);assert.match(src,/mixupSweep\(\)/);
+ assert.match(src,/kind==='duty_cases'[\s\S]*enqueue\('mixup_day',after\.businessDate\)/);assert.match(src,/mixupSweep\(/);
  console.log('ok Worker: vụ lệch mới → xét ngày; quét hằng ngày');
  console.log('ALL PASS');
 })().catch(e=>{console.error(e);process.exit(1)});

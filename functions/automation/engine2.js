@@ -1,12 +1,12 @@
 'use strict';
 const E=require('./shared/unit_engine2_v1');
-const {create}=require('./shared/unit_engine2_store_v4');   // v4 (05/11): v3 + không tạo việc mồ côi, dọn việc treo, thử lại giãn dần, nhịp không đọc trước
+const {create}=require('./shared/unit_engine2_store_v5');   // v5 (11/11): v4 + bớt đọc lặp, công bố việc cân cho POS, báo việc hẹn cho nhịp (cổng tín hiệu)
 const {createEngine}=require('./engine');
-function createEngine2Worker({db,rt,FieldValue,now=Date.now,documentId}){
+function createEngine2Worker({db,rt,FieldValue,now=Date.now,documentId,onDue}){
  const services=new Map();
  function service(store){
   let shared=null;
-  if(!services.has(store))services.set(store,create({storeId:store,fstore:db,now,documentId,log:e=>console.error('Engine2',store,e.message),
+  if(!services.has(store))services.set(store,create({storeId:store,fstore:db,now,documentId,onDue,log:e=>console.error('Engine2',store,e.message),
    getEngine:async()=>shared||(shared=createEngine({storeId:store,fstore:db,db:rt,FieldValue,now,items:[],rules:[]})),
    getInventory:async itemId=>{
     const [item,rules]=await Promise.all([db.doc(E.collection('inventory_items',store)+'/'+itemId).get(),db.collection(E.collection('refill_rules',store)).where('itemId','==',itemId).limit(2).get()]);
@@ -43,10 +43,21 @@ function createEngine2Worker({db,rt,FieldValue,now=Date.now,documentId}){
  }
  // Lượt học mỗi ngày (store tự chặn chạy lại trong ngày); lỗi học không chặn hàng đợi nghiệp vụ.
  let params=null;try{params=require('./shared/unit_engine2_params_v1.js');}catch(e){}
- const learned=new Map(),learn=async store=>{const day=new Date(now()+7*3600000).toISOString().slice(0,10);if(learned.get(store)===day)return null;try{await service(store).sweepPrepReview().catch(e=>console.error('Engine2 prep sweep',store,e.message));await service(store).mixupSweep().catch(e=>console.error('Engine2 mixup sweep',store,e.message));await service(store).sweepAlerts().catch(e=>console.error('Engine2 alert sweep',store,e.message));await service(store).sweepSubReviews().catch(e=>console.error('Engine2 sub sweep',store,e.message));const r=await service(store).learnDay({params:params||undefined});if(r)learned.set(store,day);return r;}catch(e){console.error('Engine2 learn',store,e.message);return null;}};
- return {service,source,learn,drain:(store,id)=>service(store).drain(id),tick:async store=>{const n=await service(store).retryDue();
+ // [v5-A1] Bốn lượt quét đi CÙNG lượt học và chỉ chạy khi hôm nay chưa học: kiểm mốc bền (models/current.day, 1 lượt đọc) TRƯỚC khi
+ // quét — instance khởi động lạnh không quét lại; một lần đọc cấu hình dùng chung cho cả bốn lượt quét.
+ const learned=new Map(),learn=async store=>{const day=new Date(now()+7*3600000).toISOString().slice(0,10);if(learned.get(store)===day)return {skipped:'memo'};try{
+   const sv=service(store),[cur,cfg]=await Promise.all([sv.sub('models').doc('current').get(),sv.config()]);
+   if(cur.exists&&cur.data().day===day){learned.set(store,day);return {skipped:'done_today'};}
+   if(!cfg.enabled){learned.set(store,day);return {skipped:'disabled'};}
+   await sv.sweepPrepReview(cfg).catch(e=>console.error('Engine2 prep sweep',store,e.message));await sv.mixupSweep(cfg).catch(e=>console.error('Engine2 mixup sweep',store,e.message));await sv.sweepAlerts(cfg).catch(e=>console.error('Engine2 alert sweep',store,e.message));await sv.sweepSubReviews(cfg).catch(e=>console.error('Engine2 sub sweep',store,e.message));
+   const r=await sv.learnDay({params:params||undefined});if(r)learned.set(store,day);return r;}catch(e){console.error('Engine2 learn',store,e.message);return null;}};
+ // tick(store,{learn}): learn=false → không thử lượt học (nhịp đồng hồ chỉ bật khi sang ngày mới). Trả {n, learned}.
+ return {service,source,learn,drain:(store,id)=>service(store).drain(id),nextDue:store=>service(store).nextDue(),
+  // Dấu «còn sống» ghi mù (0 lượt đọc) — nhịp không có tín hiệu vẫn giữ dấu cho POS / quanlygieo2.
+  beat:store=>service(store).heartbeat(),
+  tick:async(store,o={})=>{const n=await service(store).retryDue();
   // [v3-C] Dấu «bộ xử lý nền còn chạy» — chỉ sau khi chạy lại hàng đợi thành công; POS chỉ giao lượt cân khi dấu còn mới (45 phút).
   await service(store).heartbeat().catch(e=>console.error('Engine2 heartbeat',store,e.message));
-  await learn(store);return n;}};
+  const r=o.learn===false?null:await learn(store);return {n,learned:!!r};}};
 }
 module.exports={createEngine2Worker};

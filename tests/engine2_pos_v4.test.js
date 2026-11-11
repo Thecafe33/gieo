@@ -77,10 +77,7 @@ function weighed(inv,{itemId='j',unitId='n',base=280,net=250,tare=100,vessel='v'
 (async()=>{
  // ── Không popup / không giải thích: bản v2 không có giao diện ─────────────────────────────────────────────
  for(const bad of ['e2Modal','e2-dialog','innerHTML','Vì sao cần cân','document.createElement','toast('])assert(!SRC.includes(bad),'bản v2 không được có giao diện / lời giải thích: '+bad);
- {const h=fs.readFileSync(path.join(__dirname,'../posgieo.html'),'utf8');
-  assert(/gieo_engine2_pos_v4\.js/.test(h)&&!/gieo_engine2_pos_v[123]\.js/.test(h),'posgieo.html nạp bản v4');
-  assert(/unit_engine2_store_v4\.js/.test(h)&&!/unit_engine2_store_v[123]\.js/.test(h),'posgieo.html nạp store v4 (posFallback có bộ đếm)');
-  assert(h.indexOf('unit_engine2_staffing_v1.js')<h.indexOf('unit_engine2_store_v4.js'),'staffing nạp TRƯỚC store v4 (store đọc nó lúc nạp)');}
+ // posgieo.html nay nạp bản v5 (11/11 — kết ca nhanh) — bản v4 giữ để quay lui, test này vẫn kiểm đủ hành vi của nó.
  assert(!/gieo_engine2_pos_v1\.js/.test(fs.readFileSync(path.join(__dirname,'../posgieo.html'),'utf8')),'posgieo.html không còn nạp bản v1 (popup)');
 
  // ── 1. Engine 2 chưa bật (đối chiếu) → danh sách giữ nguyên, không dấu ngầm ───────────────────────────────
@@ -336,7 +333,7 @@ function weighed(inv,{itemId='j',unitId='n',base=280,net=250,tare=100,vessel='v'
   const g=world();delete g.FS[ROOT];const st2=create({storeId:'gg01',fstore:g.fstore,now:()=>Date.now()});
   assert.equal(await st2.heartbeat(),false,'chưa có tài liệu điều khiển → không tự tạo');assert(!g.FS[ROOT]);
   const w=fs.readFileSync(path.join(__dirname,'../functions/automation/engine2.js'),'utf8');
-  assert(/unit_engine2_store_v[34]/.test(w)&&/heartbeat\(\)/.test(w),'worker dùng store v3 / v4 (v4 = v3 + dọn việc treo) và ghi nhịp mỗi lượt đồng hồ');
+  assert(/unit_engine2_store_v[345]/.test(w)&&/heartbeat\(\)/.test(w),'worker dùng store v3 / v4 / v5 và ghi nhịp mỗi lượt đồng hồ');
   assert.equal(fs.readFileSync(path.join(__dirname,'../functions/automation/shared/unit_engine2_store_v3.js'),'utf8'),fs.readFileSync(path.join(__dirname,'../unit_engine2_store_v3.js'),'utf8'),'bản Functions khớp bản gốc (tools/automation/sync.js)');
  }
  console.log('ok Engine 2 POS v4: xác nhận ghi bridgeVersion / storeVersion; bộ đếm Engine 2 nhận / POS tự ghi theo ngày (không đếm đôi)');

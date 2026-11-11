@@ -122,7 +122,7 @@ const tasks=f=>Object.entries(f.FS).filter(([p])=>p.startsWith(ROOT+'/tasks/')).
  }
  {
   const w=require('fs').readFileSync(path.join(__dirname,'../functions/automation/engine2.js'),'utf8');
-  assert(/require\('\.\/shared\/unit_engine2_store_v4'\)/.test(w),'worker dùng store v4');
+  assert(/require\('\.\/shared\/unit_engine2_store_v[45]'\)/.test(w),'worker dùng store v4 (từ 11/11: v5 — v4 giữ để quay lui, test này vẫn kiểm đủ hành vi của v4)');
   assert.equal(require('fs').readFileSync(path.join(__dirname,'../functions/automation/shared/unit_engine2_store_v4.js'),'utf8'),require('fs').readFileSync(path.join(__dirname,'../unit_engine2_store_v4.js'),'utf8'),'bản Functions khớp gốc');
  }
 
@@ -179,7 +179,8 @@ const tasks=f=>Object.entries(f.FS).filter(([p])=>p.startsWith(ROOT+'/tasks/')).
   assert.equal(f.FS[ROOT+'/requests/'+id].revision,rev,'không tăng revision → không xử lý lần hai');
   const idx=require('fs').readFileSync(path.join(__dirname,'../functions/automation/index.js'),'utf8');
   assert(/enqueue\('measurement',event\.params\.id,false,true\)/.test(idx),'trigger _engine2_measurement dùng onlyNew');
-  assert(/\['engine2',\(\)=>engine2\.tick\(store\)\],\['queue'/.test(idx),'[5] nhịp đồng hồ: mỗi phần một khối lỗi riêng');
+  // [11/11] vòng nhịp chuyển sang functions/automation/clock.js (cổng tín hiệu) — vẫn mỗi phần một khối lỗi riêng (hành vi kiểm ở gieo_clock_cong_tin_hieu.test.js).
+  assert(/\['engine2',async\(\)=>[^\]]*engine2\.tick\(store,/.test(require('fs').readFileSync(path.join(__dirname,'../functions/automation/clock.js'),'utf8'))&&/clock\.run\(\)/.test(idx),'[5] nhịp đồng hồ: mỗi phần một khối lỗi riêng');
  }
  // ── 4: bộ đếm 14 ngày ──────────────────────────────────────────────────────────────────────────────
  {

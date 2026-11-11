@@ -1,0 +1,40 @@
+ĐỢT DEPLOY 11/11/2026 — Engine 2 v5: kết ca nhanh (cầu nối POS v5 + store v5) + «cổng tín hiệu» cho nhịp 15 phút.
+KHÔNG đổi luật / ngưỡng / phân bổ / mức kiểm soát. Không đổi luồng bán, không thêm màn, không thêm chữ nào cho nhân viên.
+Cần CẢ Hosting lẫn Functions; thứ tự nào cũng an toàn (POS v5 chạy được với worker cũ, worker mới chạy được với POS v4).
+Giải nén gói vào: /sdcard/Download/Giải nén codex/dot_11-11_engine2_v5/
+
+LƯU Ý GẤU NOEL: posgieo.html / posgieo_thu.html trong gói này ĐÃ gồm phần Gấu Noel v3 (nạp gau_noel_giangsinh.v3.js).
+   → Deploy gói dot_10-11_gau_noel TRƯỚC (hoặc cùng lúc). Nếu deploy gói đó SAU thì đừng chép đè posgieo.html / posgieo_thu.html của nó
+     lên hai file của gói này (bản của gói đó còn nạp cầu nối v4).
+
+1) HOSTING — chép đè 6 file vào thư mục deploy rồi deploy:
+   cd "/sdcard/Download/Giải nén codex/dot_11-11_engine2_v5/public"
+   cp posgieo.html posgieo_thu.html quanlygieo2.html DANH_SACH.txt gieo_engine2_pos_v5.js unit_engine2_store_v5.js /sdcard/MyCafeWeb/public/
+   cd /sdcard/MyCafeWeb && firebase deploy --only hosting
+   (KHÔNG xoá gieo_engine2_pos_v4.js / unit_engine2_store_v4.js và các bản cũ trên máy — giữ để quay lui.)
+
+2) FUNCTIONS — chép đè 6 file (clock.js là file MỚI) rồi deploy:
+   cd "/sdcard/Download/Giải nén codex/dot_11-11_engine2_v5/functions/automation"
+   cp index.js engine2.js clock.js queue.js worker.js ~/MyCafeWeb/gieo-automation/
+   cp shared/unit_engine2_store_v5.js ~/MyCafeWeb/gieo-automation/shared/
+   cd ~/MyCafeWeb && firebase deploy --only functions:gieo-automation
+   Không cần chỉ mục Firestore mới. Không có collection mới (bảng tín hiệu là MỘT tài liệu: duty_digests_gieogieo/_fleet).
+
+3) SAU DEPLOY: tắt hẳn app POS ở quầy rồi mở lại. quanlygieo2 › Engine 2 › Kết quả thực thi:
+   - «Máy POS xác nhận đã nhận»: máy ở quầy hiện «cầu nối v5»; còn dòng đỏ «cầu nối cũ v4» → máy đó chưa nạp bản mới (vẫn chạy đúng, chỉ chưa nhanh).
+   - «Bộ xử lý nền: Đang chạy» trong ~15 phút (dấu còn sống: mỗi nhịp khi quán có người trong ca, 30 phút / lần khi quán đóng).
+   - Firebase Console › Functions: gieoAutomationClock vẫn chạy 15 phút / lần nhưng mỗi lần chỉ đọc 1 tài liệu khi không có việc.
+
+4) QUAY LUI (nếu cần): Hosting — chép lại posgieo.html của gói dot_05-11_engine2_v4 (nạp cầu nối v4 + store v4) rồi deploy hosting.
+   Functions — chép lại index.js / engine2.js / queue.js / worker.js bản trước rồi deploy functions (clock.js thừa không ảnh hưởng).
+
+NỘI DUNG
+- Kết ca (nhân viên bớt chờ): dựng danh sách cân 8 → 3 vòng mạng; mỗi dòng cân Engine 2 thêm 3,8 → 0,9 vòng mạng.
+  Trần thời gian: cả lần kết ca Engine 2 chỉ được làm nhân viên chờ tối đa 4 giây (dựng danh sách: 3 giây) — mạng treo thì POS tự
+  ghi kho như cơ chế «không chắc → POS ghi» sẵn có; lượt cân được nhận muộn tự rút lại. quanlygieo2 thấy lý do ở mục «POS tự ghi».
+- Nhịp 15 phút = người gác cổng: mỗi nhịp đọc 1 bảng tín hiệu cho mọi quán; chỉ quán có tín hiệu (việc mới, việc lỗi hẹn thử lại,
+  tới giờ hẹn, sang ngày mới để học, lần trước lỗi, lưới an toàn 6 giờ) mới chạy Engine 2 / hàng đợi / worker tự động hoá.
+- Lượt học + bốn lượt quét: đúng một lần / ngày kể cả khi máy chủ khởi động lạnh (trước: có thể quét lại mỗi nhịp).
+- Số đo (node tools/automation/engine2_do_tai.js): một quán / ngày 1.800 đọc + 648 ghi → 857 đọc + 405 ghi;
+  10 quán / ngày ~18.000 đọc + ~6.400 ghi → ~7.700 đọc + ~4.050 ghi; phần «không có việc» ~12.000 → ~1.850 lượt đọc.
+- Bán một bill: Engine 2 vẫn 0 lượt đọc, 0 lần ghi (không đổi).

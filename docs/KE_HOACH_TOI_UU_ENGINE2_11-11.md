@@ -3,6 +3,7 @@
 > Ngày lập: 11/11/2026. Mốc mã đã đọc: `21736d9` (nhánh `Phan-tach-unit-engine`).
 > Đầu vào: [TOM_TAT_UNIT_ENGINE2_POS_QUANLYGIEO2.md](TOM_TAT_UNIT_ENGINE2_POS_QUANLYGIEO2.md), [LO_TRINH_ENGINE2_CAP6.md](LO_TRINH_ENGINE2_CAP6.md), [ENGINE2_POS_V3_05-11.md](ENGINE2_POS_V3_05-11.md) và mã `gieo_engine2_pos_v4.js`, `unit_engine2_store_v4.js`, `functions/automation/engine2.js` + `index.js`, `tools/automation/engine2_ui.js`.
 > **Chỉ là kế hoạch — chưa đổi dòng mã nào.** Trạng thái Engine 2 vẫn chỉ ghi ở lộ trình; tài liệu này là danh sách đề xuất chờ chủ dự án chọn.
+> **ĐÃ THỰC HIỆN 11/11 (chưa deploy) — kết quả ở mục 9.**
 > **Bản lần 3 (11/11) là bản hiện hành:** mục 3–8 — mô hình 10 cửa hàng, bốn ưu tiên của chủ dự án, quyết định đã chọn + hướng «cổng tín hiệu, giữ nguyên cơ chế». Phương án lần 2 (đổi cách đánh thức) chuyển xuống Phụ lục, **không còn là đề xuất chính** vì nó đổi cơ chế của Engine 2.
 > Mọi con số bên dưới là **ước lượng từ đọc mã**, chưa đo trên Firebase thật (bước Đ0 là đo).
 
@@ -172,6 +173,33 @@ Thứ tự deploy an toàn cả hai chiều như gói v3: POS v5 chạy được
 5. Số đo Đ0 giảm như dự kiến.
 
 **Bước kế tiếp:** kế hoạch đã đủ quyết định để code. Khi chủ dự án bảo bắt đầu, làm Đ0 trước (chỉ thêm test / công cụ đo, không đổi app), rồi Đ1.
+
+## 9. Kết quả thực hiện (11/11) — Đ0 + Đ1 + Đ2 + Đ3 xong, CHƯA deploy
+
+| | Mốc v4 (đo) | Bản v5 + cổng tín hiệu (đo) |
+|---|---|---|
+| POS dựng danh sách cân cuối ca | 19 đọc · 8 vòng mạng | 14 đọc · 3 vòng mạng (dựng lại: 8 đọc · 2 vòng) |
+| Engine 2 thêm vào mỗi dòng cân | +11 đọc · +3,8 vòng mạng | +8 đọc · +0,9 vòng mạng |
+| Kết ca 7 dòng Engine 2 — nhân viên chờ thêm | ~35 vòng mạng | ~9 vòng mạng, có trần 4 giây |
+| Một nhịp 15 phút không có việc (một quán) | 11 đọc + 4 ghi | 1 đọc cho CẢ CHUỖI + 1 ghi (dấu còn sống) |
+| Nhịp cả ngày khi instance lạnh mỗi nhịp | 9.011 đọc | 287 đọc (= khi ấm) |
+| Một quán / ngày | 1.800 đọc + 648 ghi | 857 đọc + 405 ghi |
+| — trong đó «không có việc» | 1.205 đọc + 384 ghi | 271 đọc + 137 ghi |
+| 10 quán / ngày | ~18.000 đọc + ~6.400 ghi | ~7.700 đọc + ~4.050 ghi |
+| Bán một bill | 0 / 0 | 0 / 0 |
+
+**Đã làm:** B1, B2, B3, B4, B5 (POS) · A1, A3, A4 (một phần: dùng lại danh sách việc chờ), G1, G2, G3 (worker, kể cả `queue.js` / `worker.js` — `tickStore` giữ nguyên mã, chỉ không bị gọi khi không có tín hiệu).
+
+**Khác kế hoạch (nói rõ):**
+- G1 làm bằng bảng tín hiệu + «gõ cửa» (poke) + giờ hẹn `nextDue`; lưới an toàn là **6 giờ** (không phải 1 giờ) vì việc lỗi đã tự gõ cửa. Việc thất lạc hoàn toàn (hiếm) chờ tối đa 6 giờ.
+- Dấu còn sống giữ đúng ngưỡng đọc cũ (45 / 60 phút) nên vẫn ghi mỗi nhịp khi có ca, 30 phút / lần khi đóng — đây là phần ghi «không có việc» còn lại (~137 / quán / ngày). Muốn bỏ nữa phải làm G6 (Đ4).
+- **G4 «bỏ học ngày quán nghỉ» KHÔNG làm**: quán mở hằng ngày nên lợi ≈ 0, lại đổi thời điểm học. Chỉ làm A1 (mốc học bền).
+- Lượt học đêm **không rẻ hơn** (32 so với 29 lượt đọc ở thế giới thử): thêm một truy vấn công bố việc cân cho POS, đổi lại POS không phải truy vấn mỗi lần mở màn kết ca. A4 phần `model_versions` / món đang mở / mô hình vận hành chưa làm (đổi dễ lệch kết quả).
+- A3 không giảm ở kịch bản đo (mỗi dòng một mã, khác món); chỉ có lợi khi một món có nhiều mã mở.
+
+**Còn lại (Đ4, chỉ khi cần):** G6 (dấu còn sống rời tài liệu điều khiển — cần cầu nối v6), A5 (chỉ mục giá), A6, A7.
+
+**Giới hạn của số đo:** Firebase giả + thế giới mẫu; số thật ở gg01 cần đối chiếu Firebase Console › Usage sau deploy. Chưa chạy trên Firebase thật, chưa thử trên máy POS thật (đặc biệt: trần chờ 4 giây khi mạng yếu thật).
 
 ## Phụ lục — phương án lần 2: đánh thức hoàn toàn theo tín hiệu (ĐỂ DÀNH, không làm trong kế hoạch này)
 

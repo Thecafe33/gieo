@@ -9,12 +9,16 @@ const {createWorker,rootPath}=require('./worker');
 const {createQueue}=require('./queue');
 const {createEngine}=require('./engine');
 const {createEngine2Worker}=require('./engine2');
+const {createClock,createFleet}=require('./clock');
 const stores=require('./stores.json');
 initializeApp();
 const db=getFirestore(),rt={ref:p=>getDatabase(undefined,process.env.GIEO_DATABASE_URL||'https://the-cafe-33-default-rtdb.asia-southeast1.firebasedatabase.app').ref(p)},engines=new Map();
 const getEngine=store=>{if(!engines.has(store))engines.set(store,createEngine({storeId:store,fstore:db,db:rt,FieldValue}));return engines.get(store);};
-const worker=createWorker(db,{documentId:FieldPath.documentId(),getEngine,retrySourceErrors:store=>queue.retrySourceErrors(store)}),queue=createQueue(db,worker);
-const engine2=createEngine2Worker({db,rt,FieldValue,documentId:FieldPath.documentId()});
+// [v5 — cổng tín hiệu] Bảng tín hiệu chuỗi: trigger «gõ cửa» (poke) khi có việc cho nhịp đồng hồ; nhịp chỉ vào quán có tín hiệu.
+const fleet=createFleet(db);
+const worker=createWorker(db,{documentId:FieldPath.documentId(),getEngine,retrySourceErrors:store=>queue.retrySourceErrors(store)}),queue=createQueue(db,worker,{onDue:store=>fleet.poke(store)});
+const engine2=createEngine2Worker({db,rt,FieldValue,documentId:FieldPath.documentId(),onDue:store=>fleet.poke(store)});
+const clock=createClock({db,stores,engine2,queue,worker,rootPath,fleet});
 // Exact paths only: no trigger on bills or ordinary top-level writes in other apps.
 for(const store of stores){
  if(!/^gg\d{2}$/.test(store))throw Error('Mã quán không hợp lệ trong stores.json');
@@ -22,7 +26,8 @@ for(const store of stores){
   exports[store+'_'+kind]=onDocumentWritten({document:A.collection(kind,store)+'/{id}',region:'asia-southeast1',retry:true,maxInstances:2},async event=>{
    const before=event.data.before.exists?event.data.before.data():null,after=event.data.after.exists?event.data.after.data():null;
    await engine2.source(store,kind,event.params.id,before,after);
-   try{await queue.enqueue(store,kind,event.params.id,before,after);}catch(e){await queue.recordEnqueueError(store,kind,event.params.id,e);throw e;}
+   let job;try{job=await queue.enqueue(store,kind,event.params.id,before,after);}catch(e){await queue.recordEnqueueError(store,kind,event.params.id,e);await fleet.poke(store);throw e;}
+   if(job&&job.queued)await fleet.poke(store);   // [v5] có việc tự động hoá mới (ngày cần dựng lại, hồ sơ có hạn) → nhịp kế tiếp vào quán này
   });
  }
  exports[store+'_automation_job']=onDocumentWritten({document:rootPath(store)+'/jobs/{id}',region:'asia-southeast1',retry:true,maxInstances:2},async event=>{
@@ -31,7 +36,9 @@ for(const store of stores){
   await queue.drain(store,event.params.id);
  });
  exports[store+'_engine2_shift']=onDocumentWritten({document:A.collection('employee_shifts',store)+'/{id}',region:'asia-southeast1',retry:true,maxInstances:2},async event=>{
-  await engine2.source(store,'employee_shifts',event.params.id,event.data.before.exists?event.data.before.data():null,event.data.after.exists?event.data.after.data():null);
+  const before=event.data.before.exists?event.data.before.data():null,after=event.data.after.exists?event.data.after.data():null;
+  await clock.shiftSignal(store,before,after).catch(e=>console.error('Gieo shift signal',store,e.message));   // [v5] vào / ra ca → quán mở / đóng + dấu còn sống ngay
+  await engine2.source(store,'employee_shifts',event.params.id,before,after);
  });
  exports[store+'_engine2_price']=onDocumentWritten({document:A.collection('price_history',store)+'/{id}',region:'asia-southeast1',retry:true,maxInstances:2},async event=>{
   await engine2.source(store,'price_history',event.params.id,event.data.before.exists?event.data.before.data():null,event.data.after.exists?event.data.after.data():null);
@@ -51,9 +58,6 @@ for(const store of stores){
   if(a?.enabled&&a.settingsRevision!==b?.settingsRevision)await engine2.service(store).enqueue('bootstrap','settings_'+a.settingsRevision);
  });
 }
-exports.gieoAutomationClock=onSchedule({schedule:'every 15 minutes',timeZone:'Asia/Ho_Chi_Minh',region:'asia-southeast1',timeoutSeconds:540,maxInstances:1},async()=>{
- // [v4] Mỗi phần một khối lỗi riêng: Engine 2 lỗi không làm bỏ nhịp của hàng đợi / worker tự động hoá (và ngược lại).
- for(const store of stores)for(const [name,run] of [['engine2',()=>engine2.tick(store)],['queue',()=>queue.retryDue(store)],['worker',()=>worker.tickStore(store)]])try{await run();}catch(e){
-  await db.doc(rootPath(store)).set({lastError:String(e.message||e),errorAt:new Date().toISOString(),errorPart:name},{merge:true}).catch(()=>{});console.error('Gieo automation',store,name,e);
- }
-});
+// [v5 — cổng tín hiệu] Nhịp 15 phút chỉ còn là người gác cổng: đọc một bảng tín hiệu cho mọi quán, chỉ quán có tín hiệu mới chạy
+// Engine 2 / hàng đợi / worker tự động hoá (mỗi phần vẫn một khối lỗi riêng) — xem clock.js.
+exports.gieoAutomationClock=onSchedule({schedule:'every 15 minutes',timeZone:'Asia/Ho_Chi_Minh',region:'asia-southeast1',timeoutSeconds:540,maxInstances:1},async()=>{await clock.run();});

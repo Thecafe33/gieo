@@ -84,7 +84,7 @@ for (const [f, q] of [['pos.html', 'tc33'], ['PosX.html', 'xofa'], ['posgieo.htm
   chk(tag > 0 && new RegExp('gau_noel_giangsinh\\.v3\\.js"\\s+data-quan="' + q + '"').test(s), f + ': có thẻ gấu data-quan="' + q + '"');
   // posgieo: sau thẻ gấu còn các file Engine 2 / trợ lý tự động — không khai báo lại hàm gấu bọc (kiểm ngay dưới)
   const sau = (conLai.match(/<script[^>]*\ssrc="([^"]+)"/g) || []).map(x => /src="([^"]+)"/.exec(x)[1]);
-  const duocPhep = f === 'posgieo.html' ? ['gieo_automation_pos.v3.js', 'unit_engine2_v1.js', 'unit_engine2_staffing_v1.js', 'unit_engine2_store_v4.js', 'gieo_engine2_pos_v4.js'] : [];
+  const duocPhep = f === 'posgieo.html' ? ['gieo_automation_pos.v3.js', 'unit_engine2_v1.js', 'unit_engine2_staffing_v1.js', 'unit_engine2_store_v5.js', 'gieo_engine2_pos_v5.js'] : [];
   chk(sau.every(x => duocPhep.indexOf(x) >= 0), f + ': sau thẻ gấu chỉ còn script đã kiểm (không khai báo lại hàm bị bọc)', sau);
   for (const x of sau) if (duocPhep.indexOf(x) >= 0) chk(!/\bfunction\s+(assistFinalizeOrder|buildReceiptContent|renderReceiptCanvas|renderCustomerInfo|clearCustomer|delOrderConfirm)\b|autoPrintIfEnabled\s*=/.test(rd(x)), f + ': ' + x + ' không khai báo lại hàm gấu bọc');
 }
