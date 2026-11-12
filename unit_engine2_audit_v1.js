@@ -58,6 +58,11 @@ const CODES={
  LOCK_STALE:['violation','Khoá cân treo: lượt cân đã kết thúc hoặc không tồn tại'],
  CONTROL_BELOW_FLOOR:['violation','Mức kiểm soát thấp hơn mức sàn quản lý đặt'],
  CONTROL_BAD_LEVEL:['violation','Mức kiểm soát ngoài 0–3'],
+ // [F1 12/11] Sổ lệch giải thích hao hụt (bán khi chưa có tem mở / lỗi kết nối lúc trừ tem) — viết lại độc lập với store.
+ ANOMALY_EXPLAINED_BUT_ALLOCATED:['violation','Phần hao hụt đã có Sổ lệch giải thích vẫn bị phân bổ cho pha chế'],
+ ANOMALY_EXPLAIN_UNSUPPORTED:['violation','Hồ sơ trừ phần «Sổ lệch giải thích» nhưng không có dòng Sổ lệch tương ứng (cùng món, bán ngoài tem, đủ lượng)'],
+ ANOMALY_EXPLAINED_CONTROL:['violation','Hồ sơ được Sổ lệch giải thích hết nhưng vẫn làm căn cứ nâng mức kiểm soát'],
+ ANOMALY_NOT_DEDUCTED:['warning','Hồ sơ phân bổ đủ trong khi có Sổ lệch đang mở cùng món trong khoảng (hồ sơ chốt trước luật F1, hoặc Sổ lệch vừa mở lại)'],
  CONTROL_NOT_PUBLISHED:['violation','Món đang kiểm soát nhưng POS không nhận được (thiếu trong danh sách)'],
  CLEAN_SAMPLE_INVALID:['violation','Ngoại lệ / không có mã mở được tính là mẫu sạch để hạ mức'],
  CONTROL_NOT_ACKED:['warning','Chưa máy POS nào xác nhận kiểm soát — biện pháp chưa có hiệu lực'],
@@ -154,6 +159,23 @@ function check(snap){
   else if(!near(d.quantity,c.quantity)||stable((d.allocations||[]).map(a=>[a.employeeId,a.qty,a.value]))!==stable(alloc.map(a=>[a.employeeId,a.qty,a.value])))add('DECISION_LOG_MISMATCH',ref,{decisionId:c.decisionId});
   if(c.mode==='shadow'&&(snap.controls||[]).some(k=>(k.reasonCaseIds||[]).includes(c.id)))add('SHADOW_EFFECT',ref);
   if(s&&s.updatedAt&&ms(s.updatedAt)>ms(c.updatedAt)&&!Object.values(R).some(r=>r.dirty&&r.sourceId===(c.originId||c.sourceId)))add('SOURCE_CHANGED_AFTER_DECISION',ref,{sourceUpdatedAt:s.updatedAt,caseUpdatedAt:c.updatedAt});
+ }
+ // --- [F1 12/11] Sổ lệch giải thích hao hụt ---
+ const AN=snap.anomalies||{},ANK=['no_open_tem','rt_error'],anLeft=a=>Math.abs(Number(a.qty)||0)-(Number(a.absorbedQty)||0);
+ const claimed=new Set(cases.filter(c=>active(c)&&c.status!=='voided').flatMap(c=>c.explainedByAnomaly?.anomalyIds||[]));
+ for(const c of cases){
+  if(!active(c)||c.status==='voided'||c.basis==='manual_source')continue;
+  const ref='cases/'+c.id,ex=c.explainedByAnomaly,alloc=sum(c.allocations||[],a=>a.qty);
+  if(ex){
+   const rows=(ex.anomalyIds||[]).map(id=>AN[id]),cover=rows.reduce((a,x)=>a+(x?Math.abs(Number(x.qty))||0:0),0);
+   if(!rows.length||rows.some(a=>!a||a.itemId!==c.itemId||!ANK.includes(a.kind)||!(Number(a.qty)<0))||cover<Number(ex.qty)-EPS)add('ANOMALY_EXPLAIN_UNSUPPORTED',ref,{anomalyIds:ex.anomalyIds||[],qty:ex.qty});
+   if(alloc>Number(c.quantity)-Number(ex.qty)+EPS||!near(Number(c.pending?.qty)||0,Math.max(Number(ex.qty)||0,c.basis==='anomaly_explained'?Number(c.quantity):0)))add('ANOMALY_EXPLAINED_BUT_ALLOCATED',ref,{allocated:alloc,explained:ex.qty,quantity:c.quantity});
+   if(c.basis==='anomaly_explained'&&(snap.controls||[]).some(k=>(k.reasonCaseIds||[]).includes(c.id)))add('ANOMALY_EXPLAINED_CONTROL',ref);
+  }else if(alloc>EPS){
+   const iv=c.interval||{},lo=iv.checkpointId?ms(iv.from):ms(C[c.containerId]?.openedAt)-3*86400000,hi=ms(iv.to),dec=ms(c.updatedAt);
+   const miss=Object.values(AN).filter(a=>a.status==='open'&&a.itemId===c.itemId&&ANK.includes(a.kind)&&Number(a.qty)<0&&anLeft(a)>EPS&&!claimed.has(a.id)&&ms(a.createdAt)>=lo&&ms(a.createdAt)<=hi&&!(ms(a.createdAt)>dec));
+   if(miss.length)add('ANOMALY_NOT_DEDUCTED',ref,{anomalyIds:miss.map(a=>a.id)});
+  }
  }
  for(const [sid,rows] of bySource)if(rows.length>1)add('DUPLICATE_LOSS_CASE','stock_transactions/'+sid,{cases:rows.map(c=>c.id)});
  for(const [uid,rows] of byUnit){
@@ -330,9 +352,13 @@ async function collect({fstore,storeId:sid,from,to,limit=500,collection}){
   await byIds(coll('duty_cases'),[...(x.caseIds?.surplus||[]),...(x.caseIds?.shortage||[])],mixupCases);}
  const prepReviews=await rows('prep_reviews',sub('prep_reviews').where('businessDate','>=',from).where('businessDate','<=',to)),prepSources={},prepAlerts={};
  await byIds(coll('stock_transactions'),prepReviews.map(r=>r.txId),prepSources);await byIds(coll('alerts'),prepReviews.map(r=>r.fyiAlertId),prepAlerts);
+ // [F1] Sổ lệch: dòng hồ sơ đã dùng + dòng đang mở của các món có hồ sơ (một truy vấn có giới hạn / món).
+ const anomalies={};
+ await byIds(coll('stock_anomalies'),cases.flatMap(c=>c.explainedByAnomaly?.anomalyIds||[]),anomalies);
+ for(const item of [...new Set(cases.map(c=>c.itemId).filter(Boolean))])for(const a of await rows('anomalies',coll('stock_anomalies').where('itemId','==',item).where('status','==','open')))anomalies[a.id]=a;
  const controls=(await rows('controls',sub('controls'))).map(k=>({...k,itemId:k.itemId||k.id}));
  const devices=await rows('devices',sub('devices'));
- return {store,range:{from,to},config,subReviews,subRecons,alertReviews,alertReviewCases,mixups,mixupCatalog,mixupCases,prepReviews,prepSources,prepAlerts,sources,containers,receipts,checkpoints,decisions,measurements,prices,items,requests,cases,shifts,tasks,locks,controls,devices,truncated};
+ return {store,range:{from,to},config,subReviews,subRecons,alertReviews,alertReviewCases,mixups,mixupCatalog,mixupCases,prepReviews,prepSources,prepAlerts,anomalies,sources,containers,receipts,checkpoints,decisions,measurements,prices,items,requests,cases,shifts,tasks,locks,controls,devices,truncated};
 }
 
 async function run(opts){return check(await collect(opts));}

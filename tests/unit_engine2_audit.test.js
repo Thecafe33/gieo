@@ -33,6 +33,7 @@ function withMixup(FS){
   outcome:'suspected_wrong_drink',reweigh:{outcome:'suspected_wrong_drink',evidenceTaskId:'t1'},caseIds:{surplus:[],shortage:['dc_ts']},responsibility:{basis:'shift_group'},staff:[{id:'a'}]};
  return FS;
 }
+const AN='stock_anomalies_gieogieo/an1',ANOM={itemId:'jelly',itemName:'Thạch hồng',unit:'g',qty:-300,kind:'no_open_tem',txType:'CONSUMPTION',status:'open',createdAt:'2026-10-20T00:00:00.000Z',businessDate:'2026-10-20'};
 const weighCases=FS=>casesOf(FS).filter(([,d])=>d.originKind==='measurement').sort((a,b)=>a[1].interval.to.localeCompare(b[1].interval.to));
 
 (async()=>{
@@ -106,6 +107,11 @@ const weighCases=FS=>casesOf(FS).filter(([,d])=>d.originKind==='measurement').so
   ['khoá cân treo',FS=>{const [,d]=weighCases(FS)[0];FS[ROOT+'/measurement_locks/j']={measurementId:d.originId};},'LOCK_STALE'],
   ['mức kiểm soát dưới sàn',FS=>{FS[ROOT+'/controls/j'].manualFloor=3;},'CONTROL_BELOW_FLOOR'],
   ['món kiểm soát không tới POS',FS=>{FS[ROOT].controlledItemIds=['j'];},'CONTROL_NOT_PUBLISHED'],
+  // [F1 12/11] Sổ lệch giải thích hao hụt
+  ['phần Sổ lệch giải thích vẫn phân bổ',FS=>{const [p]=finishCase(FS);FS[AN]=ANOM;FS[p].explainedByAnomaly={qty:300,anomalyIds:['an1']};},'ANOMALY_EXPLAINED_BUT_ALLOCATED'],
+  ['giải thích bằng Sổ lệch không có thật',FS=>{const [p]=finishCase(FS);FS[p].explainedByAnomaly={qty:300,anomalyIds:['khong_co']};},'ANOMALY_EXPLAIN_UNSUPPORTED'],
+  ['giải thích hết mà vẫn nâng mức',FS=>{const [p,d]=finishCase(FS);FS[AN]=ANOM;Object.assign(FS[p],{basis:'anomaly_explained',allocations:[],pending:{qty:300,value:d.amount},explainedByAnomaly:{qty:300,anomalyIds:['an1']}});FS[ROOT+'/controls/jelly'].reasonCaseIds=[d.id];},'ANOMALY_EXPLAINED_CONTROL'],
+  ['hồ sơ bỏ qua Sổ lệch đang mở',FS=>{FS[AN]=ANOM;},'ANOMALY_NOT_DEDUCTED'],
   ['ngoại lệ tính là mẫu sạch',FS=>{const k=Object.keys(FS).find(p=>p.startsWith(ROOT+'/tasks/')&&FS[p].status==='queued');FS[k].status='exception_recorded';FS[ROOT+'/controls/j'].deescalationEvidence={taskIds:[FS[k].id]};},'CLEAN_SAMPLE_INVALID']
  ];
  const missed=[];
