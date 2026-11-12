@@ -25,8 +25,8 @@
 - **Việc chờ, không tự đụng**: chuyển mã / mật khẩu bí mật vào backend (hỏi chủ quán trước khi bắt đầu).
 
 ## Kho (Unit Engine) & đa cửa hàng
-- **Tem = sự thật**: tồn = Σ tem sealed + Σ `unitBase` tem đang mở; khoản không gắn được → Sổ lệch. Bất biến **B1–B15** (mục 2.1 `docs/KE_HOACH_UNIT_ENGINE_DA_CUA_HANG.md`) — mọi thay đổi phải giữ. POS và Quản lý lệch nhau → theo POS.
-- Engine hiện hành **`unit_engine.v21.js`** (API `docs/UNIT_ENGINE.md`). App không ghi thẳng dữ liệu kho — gọi `UnitEngine.*`.
+- **Tem = sự thật**: tồn = Σ tem sealed + Σ `unitBase` tem đang mở; khoản không gắn được → Sổ lệch. Bất biến **B1–B16** (mục 2.1 `docs/KE_HOACH_UNIT_ENGINE_DA_CUA_HANG.md`) — mọi thay đổi phải giữ. POS và Quản lý lệch nhau → theo POS.
+- Engine hiện hành **`unit_engine.v22.js`** (12/11, CHƯA deploy — trên máy chủ vẫn v21; API `docs/UNIT_ENGINE.md`). App không ghi thẳng dữ liệu kho — gọi `UnitEngine.*`.
 - Lớp đường dẫn hiện hành **`data_access.v9.js`** (cả posgieo / quanlygieo / manage). Quán hiện tại `gg01` giữ nguyên mọi tên; quán mới = tên + `__{storeId}`. Collection / gốc RT mới → đăng ký `GieoData.REG` (S / C / G / X). Ghi đổi lãi/lỗ ngày cũ tự ghi dấu `pl_dirty_gieogieo`. POS gắn quán bằng mã 6 ký tự — không tự gắn, không bắt nhập lại.
 - NL / BTP đã dùng **không xoá** — «Ngừng sử dụng» (`active:false`).
 - Engine 2 (cấp 6): mặc định TẮT; bản POS đã deploy = `gieo_engine2_pos_v4.js` + `unit_engine2_store_v4.js`. Bản mới CHƯA deploy = `gieo_engine2_pos_v5.js` + `unit_engine2_store_v5.js` + nhịp «cổng tín hiệu» `functions/automation/clock.js` (kế hoạch + số đo `docs/KE_HOACH_TOI_UU_ENGINE2_11-11.md`; đo lại bằng `node tools/automation/engine2_do_tai.js`) — chưa deploy thì còn sửa tại chỗ được, sau deploy = v6. Lộ trình duy nhất `docs/LO_TRINH_ENGINE2_CAP6.md`, chi tiết `docs/ENGINE2_POS_V3_05-11.md`.

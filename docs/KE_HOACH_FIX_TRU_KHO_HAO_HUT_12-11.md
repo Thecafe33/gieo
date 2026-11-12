@@ -3,7 +3,7 @@
 > **Tài liệu bàn giao cho phiên làm việc mới.** Đọc file này + `CLAUDE.md` là đủ để bắt đầu; không cần lịch sử trò chuyện.
 > Nhánh: `Phan-tach-unit-engine`. Mốc mã lúc lập: `83ec3c8`.
 > Nguồn phát hiện: [RA_SOAT_TRU_KHO_HAO_HUT_12-11.md](RA_SOAT_TRU_KHO_HAO_HUT_12-11.md) (báo cáo rà soát, đã tái hiện bằng mã thật).
-> Trạng thái: **CHƯA sửa gì.** Bốn việc F1–F4 dưới đây; F1 làm được ngay, F2–F4 đổi hành vi kho → phải được chủ dự án duyệt (mục 6) trước khi code.
+> Trạng thái: **ĐÃ LÀM F1–F4 (12/11), CHƯA deploy.** Chủ dự án duyệt mục 6: câu 1–2 mặc định (3 ngày), câu 3 có, câu 4 tự chạy nốt, câu 5 bỏ qua (không công cụ rà dữ liệu cũ). Chỗ làm khác kế hoạch: mục 8.
 
 ## 1. Bối cảnh cần biết (2 phút)
 
@@ -129,3 +129,15 @@ F2 + F3 nên ra **một** bản `unit_engine.v22.js` (một lần đổi engine,
 | Ngày | Việc | Kết quả | Commit |
 |---|---|---|---|
 | 12/11 | Rà soát + lập kế hoạch | Báo cáo + 3 kịch bản thử; chưa sửa | `83ec3c8` |
+| 12/11 | F1 Engine 2 không quy phần hao hụt có Sổ lệch giải thích | `unit_engine2_store_v5.js` (finish / measure), kiểm toán thêm 4 mã; test `unit_engine2_anomaly` | `a337e29` |
+| 12/11 | F3 + F2 kho `unit_engine.v22.js`; F4 việc bền bill chính (`pos_thanh_toan.v2.js` + `posgieo.html`); nhãn `rt_error` ở quanlygieo | test `tru_tem_thu_lai`, `mo_tem_ganh_ngoai_tem`, `bill_tru_kho_ben`; mốc test giữ 6 FAIL có sẵn | (commit này) |
+
+## 8. Chỗ làm khác kế hoạch / giới hạn còn lại (12/11)
+
+1. **F2 chỉ gánh `no_open_tem`, không gánh `rt_error`.** `rt_error` = lúc bán CÓ tem đang mở (hàng ra từ tem đó) → tem mở sau gánh là sai (tem cũ sẽ báo hết dư đúng lượng đó → tính hai lần). `rt_error` để Engine 2 F1 giải thích + quản lý xử lý.
+2. **Cửa sổ F2 = «dòng chưa lần mở tem nào xét»** thay cho «sau lần báo hết gần nhất»: đúng nghĩa «tem mở ĐẦU TIÊN sau lúc bán là tem gánh». Lần mở tem nào đọc thấy dòng mà không gánh (đang có tem khác mở / vượt dung tích) thì đánh dấu `absorbSkippedBy` trên dòng đó → tem mở sau không gánh lại. Không cần truy vấn tem đã báo hết (không giới hạn được) và KHÔNG ghi lên doc món (thử ghi mốc trên doc món thì lớp đồng bộ danh mục đa cửa hàng chép sang quán khác — test `da_cua_hang_b2` bắt được). Kèm: chỉ gánh khi không còn tem khác đang mở; ≤ 3 ngày; chỉ dòng `no_open_tem` ghi từ v22 (`ue:22` — dữ liệu cũ không tự sửa, đúng câu 5).
+3. **F3 ở POS: chỉ bán bill chính truyền `opId`** (thử lại + chống lặp). Thêm topping / đổ ly / bắt đầu mẻ / bù BTP chưa truyền `opId` (sẽ cần `pos_orders.v2`, `pos_kho.v3`, `pos_prep.v3` — chưa làm để không phát hành thêm 3 module): các đường này KHÔNG thử lại (như v21), nhưng nhãn Sổ lệch vẫn đúng `rt_error` nhờ engine tự nhận «món vừa lỗi kết nối ≤ 15 giây». Bán BTP trong engine đã dùng `opId = txId`.
+4. **F3.4 (vì sao không thấy cảnh báo):** trên app thật cảnh báo vẫn ghi (bộ nhớ đệm `KHO_ITEMS_CACHE` có sẵn); môi trường thử thiếu biến đó → `C.getItems()` ném NGOÀI `try` → cảnh báo bị nuốt. v22 tra an toàn + đọc doc món khi thiếu đệm.
+5. **F1 không thêm trigger** khi dòng Sổ lệch đổi trạng thái sau khi hồ sơ đã chốt; hồ sơ chỉ tính lại khi có tín hiệu sẵn có (nguồn đổi, giá đổi…). Một dòng Sổ lệch chỉ giải thích MỘT hồ sơ (truy vấn `explainedByAnomaly.anomalyIds array-contains`, chỉ mục đơn trường tự có). Cửa sổ F1: từ mốc cân hợp lệ, hoặc từ lúc mở tem − 3 ngày (bán trước khi quét mở).
+6. **F4 / dấu chống lặp:** vòng 30 lượt / tem. Chạy nốt bill dở chỉ chắc chắn không trừ đôi khi tem đó chưa bị báo hết và chưa quá 30 lượt bán sau lúc app tắt — vì vậy chạy nốt ngay khi mở app (sau khi tải đơn) và ở kết ca, chỉ bill của ngày đang mở, việc chưa xong > 2 phút. Bill bổ sung (`_backfillMode`) không có việc; xoá bill hủy việc `pending` như việc thêm topping.
+7. **Deploy:** cần CẢ Hosting (posgieo, quanlygieo, quanlygieo2, `unit_engine.v22.js`, `pos_thanh_toan.v2.js`, store v5) lẫn Functions (`engine.js` + `shared/unit_engine.v22.js` + store v5). Máy còn chạy v21 vẫn đúng như trước (dòng Sổ lệch của v21 không có `ue:22` nên không bị gánh).

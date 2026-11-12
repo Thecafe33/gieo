@@ -17,6 +17,11 @@ const kind = process.env.CORE || (hasEngine ? 'engine' : 'html');
 // kiểm chứng bằng kho_fifo_nang_cao, mọi kịch bản khác vẫn so nguyên ảnh cũ.
 const v19 = kind === 'engine' && Number(/v(\d+)/.exec(require('./lib/engine_file'))[1]) >= 19;
 const V19_SNAP = path.join(__dirname, 'snapshots', 'core.v19.json');
+// v22 (12/11, F2 + F3) đổi có chủ ý: bán BTP có mã lượt → dấu chống lặp `lastConsumeOps` trên lô; Sổ lệch «bán khi chưa có tem
+// mở» ghi `ue:22`; mở tem NL đọc Sổ lệch của món (không ghi gì khi không có dòng nào). Chỉ lưu phần chênh của các kịch bản đó (UPDATE_V22=1), mọi kịch bản khác vẫn so ảnh cũ.
+const v22 = kind === 'engine' && Number(/v(\d+)/.exec(require('./lib/engine_file'))[1]) >= 22;
+const V22_SNAP = path.join(__dirname, 'snapshots', 'core.v22.json');
+const V22_ALLOWED = ['P1_ban_btp', 'P2_ban_btp_goi_lai', 'K2_consumption_ngoai_tem', 'K9_so_lech'];
 const C = 'stock_containers_gieogieo', PB = 'prep_batches_gieogieo', INV = 'inventory_items_gieogieo', PI = 'prep_items_gieogieo';
 const ITEM = { id: 'X', name: 'Sữa', unit: 'ml', trackingMode: 'unit', countUnitName: 'Hộp', packagingUnits: [{ name: 'Hộp', baseQty: 1000 }] };
 const ATOM = { id: 'K', name: 'Kit', unit: 'cái', trackingMode: 'unit', countUnitName: 'Cái', packagingUnits: [{ name: 'Cái', baseQty: 1 }] };
@@ -158,6 +163,15 @@ async function runOne(name) {
     fs.writeFileSync(V19_SNAP, JSON.stringify(patch, null, 1));
     console.log('ALL PASS — đã ghi phần chênh v19, giữ nguyên core.json'); return;
   }
+  if (process.env.UPDATE_V22 === '1' && v22) {
+    const old = Object.assign(JSON.parse(fs.readFileSync(SNAP, 'utf8')), JSON.parse(fs.readFileSync(V19_SNAP, 'utf8'))), patch = {};
+    for (const name of Object.keys(out)) if (JSON.stringify(out[name]) !== JSON.stringify(old[name])) {
+      if (!V22_ALLOWED.includes(name)) throw new Error('v22 đổi ngoài phạm vi đã duyệt: ' + name);
+      patch[name] = out[name];
+    }
+    fs.writeFileSync(V22_SNAP, JSON.stringify(patch, null, 1));
+    console.log('ALL PASS — đã ghi phần chênh v22 (' + Object.keys(patch).join(', ') + ')'); return;
+  }
   if (!fs.existsSync(SNAP) || process.env.UPDATE === '1') {
     fs.mkdirSync(path.dirname(SNAP), { recursive: true });
     fs.writeFileSync(SNAP, JSON.stringify(out, null, 1));
@@ -167,6 +181,7 @@ async function runOne(name) {
   }
   const golden = JSON.parse(fs.readFileSync(SNAP, 'utf8'));
   if (v19) Object.assign(golden, JSON.parse(fs.readFileSync(V19_SNAP, 'utf8')));
+  if (v22) Object.assign(golden, JSON.parse(fs.readFileSync(V22_SNAP, 'utf8')));
   let ok = true;
   for (const name of Object.keys(S)) {
     const a = JSON.stringify(out[name]), b = JSON.stringify(golden[name]);

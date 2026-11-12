@@ -64,6 +64,13 @@ const failLot = (f, condFn) => { const orig = f.fake.fstore.runTransaction.bind(
     const res = await Promise.all([sale(UE1), sale(UE2)]);
     failRt = false;
     const dup = res.find(r => r && r.duplicate);
+    if (Number((/v(\d+)/.exec(FILE) || [])[1]) >= 22) {
+      // [v22 F3] cùng txId = cùng mã lượt → lượt thứ hai thấy dấu chống lặp trên lô, KHÔNG trừ lần hai → không có gì để bù / phục hồi.
+      eq([!!dup, dup && dup.compensated, fake.rtGet('active_units_gieogieo/P/b1/unitBase'), Object.keys(fake.FS).filter(k => k.startsWith('dup_recovery_gieogieo/')).length], [true, true, 150, 0],
+        'L17 (v22) hai máy cùng txId → lô chỉ trừ một lần (150), không cần bù, không việc phục hồi');
+      await UE1.consume.recoverDuplicates();
+      eq(fake.rtGet('active_units_gieogieo/P/b1/unitBase'), 150, 'L17 (v22) chạy phục hồi → không đổi');
+    } else {
     eq([!!dup, dup && dup.compensated], [true, false], 'L17 lượt trùng hoàn thất bại → KHÔNG báo đã bù (compensated:false)');
     const pend = Object.keys(fake.FS).filter(k => k.startsWith('dup_recovery_gieogieo/')).map(k => fake.FS[k]);
     eq([pend.length, pend[0] && pend[0].status, Object.keys(fake.FS).some(k => k.startsWith('alerts_gieogieo/dupfix'))], [1, 'pending', true], 'L17 có việc phục hồi bền (pending) + cảnh báo');
@@ -72,6 +79,7 @@ const failLot = (f, condFn) => { const orig = f.fake.fstore.runTransaction.bind(
     eq([fake.rtGet('active_units_gieogieo/P/b1/unitBase'), fake.FS[PI + '/P'].currentStock, Object.values(fake.FS).filter(v => v && v.kind === 'prep' && v.txId).map(v => v.status)], [150, 150, ['done']], 'L17 chạy phục hồi → hoàn đủ (150), việc đóng');
     await UE1.consume.recoverDuplicates();
     eq(fake.rtGet('active_units_gieogieo/P/b1/unitBase'), 150, 'L17 chạy phục hồi lần nữa → không hoàn đôi');
+    }
   }
   // ── Lỗi 18: lượt lỗi rồi mở lại màn với số cân/sổ KHÁC → làm tiếp bằng đúng dữ liệu lượt cũ ──
   {

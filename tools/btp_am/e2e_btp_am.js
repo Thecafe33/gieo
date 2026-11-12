@@ -17,7 +17,7 @@ const server=http.createServer((req,res)=>{const u=new URL(req.url,'http://x');
   const page=await b.newPage({viewport:{width,height:860}}),errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.route('**/*',r=>r.request().url().startsWith(base)?r.continue():r.abort());await page.goto(base+'/p');
   await page.addScriptTag({content:'(function(){const process={env:{}};'+fake+'})();'});
-  await page.addScriptTag({url:base+'/unit_engine.v21.js'});
+  await page.addScriptTag({url:base+'/unit_engine.v22.js'});
   await page.addScriptTag({content:`
    const NOW=Date.now(),iso=ms=>new Date(ms).toISOString(),day=new Date(NOW+7*3600000).toISOString().slice(0,10),yday=new Date(NOW+7*3600000-86400000).toISOString().slice(0,10);
    window.__fx=__fakefb.makeFake({rt:{active_units_gieogieo:{tc:{L1:{code:'TC01',unitBase:100,openedAt:NOW-6*3600000},L2:{code:'TC02',unitBase:400,openedAt:NOW-3600000}},cot:{E1:{code:'CS01',unitBase:300,openedAt:NOW-30*3600000}}}},fs:{

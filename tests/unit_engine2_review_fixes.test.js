@@ -86,7 +86,7 @@ async function line(ctx,cycle,baseline,weighed,at,tare=100){
  const D='2026-10-24';
  function subFx(rows,nowMs){
   const fake=makeFake({fs:{[ROOT]:{enabled:true,mode:'active',protocolVersion:1,fleetConfirmed:true,fromDate:D,settingsRevision:1},...rows}}),ctx={console,crypto:require('node:crypto').webcrypto,setTimeout,clearTimeout};
-  vm.runInNewContext(fsx.readFileSync(path.join(__dirname,'../unit_engine.v21.js'),'utf8'),ctx);
+  vm.runInNewContext(fsx.readFileSync(path.join(__dirname,'../unit_engine.v22.js'),'utf8'),ctx);
   ctx.UnitEngine.init({fstore:fake.fstore,db:fake.db,FieldValue:fake.FieldValue,now:()=>nowMs,storeId:'gg01',app:'quanly'});
   return {...fake,s:create({storeId:'gg01',fstore:fake.fstore,now:()=>nowMs,inventory:ctx.UnitEngine})};
  }

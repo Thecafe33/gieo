@@ -1622,13 +1622,13 @@ const lechMuc = (m, n) => SO.filter(p => JSON.stringify(m[p]) !== JSON.stringify
       { kb: 'khachTichTem', file: 'pos_customers.v1.js', tim: /const canAdd = Math\.min\(drinkCount, Math\.max\(0, 2 - stampsToday\)\);/, thay: 'const canAdd = Math.min(drinkCount, Math.max(0, 3 - stampsToday));', mo: 'đổi trần tem mỗi ngày 2 → 3' },
       { kb: 'khachThemThanhVien', file: 'pos_customers.v1.js', tim: /source: 'pos_gieogieo'/, thay: "source: 'pos_khac'", mo: 'đổi nguồn tạo thành viên' },
       { kb: 'gioHang', file: 'pos_cart.v2.js', tim: /return a \+ \(c\.price \+ toppingSum\) \* c\.qty;/, thay: 'return a + (c.price + toppingSum) * c.qty + 1;', mo: 'lệch tổng giỏ +1', muc: 'sau' },
-      { kb: 'ttTienMat', file: 'pos_thanh_toan.v1.js', tim: /cashChange: cashChange !== null && cashChange !== undefined \? cashChange : 0,/, thay: 'cashChange: cashChange !== null && cashChange !== undefined ? cashChange + 1 : 0,', mo: 'lệch tiền thối ghi trên đơn' },
-      { kb: 'ttChuyenKhoan', file: 'pos_thanh_toan.v1.js', tim: /db\.ref\('bank_confirmations\/' \+ orderId\)\.remove\(\)/, thay: "db.ref('bank_confirmations/' + orderId + 'x').remove()", mo: 'xoá nhầm node bank_confirmations' },
-      { kb: 'ttChuyenKhoanTay', file: 'pos_thanh_toan.v1.js', tim: /manualConfirm: true, staffId: staffEmp\.id/, thay: 'manualConfirm: true, staffId: "x"', mo: 'đổi người xác nhận tay' },
-      { kb: 'ttTinhRieng', file: 'pos_thanh_toan.v1.js', tim: /grp\.cashGiven = cashGiven \|\| subTotal;/, thay: 'grp.cashGiven = (cashGiven || subTotal) + 1;', mo: 'lệch tiền khách đưa của nhóm Tính riêng' },
-      { kb: 'ttGiamGia', file: 'pos_thanh_toan.v1.js', tim: /return Math\.max\(0, getCartTotal\(\) - togoDisc - appDisc\);/, thay: 'return Math.max(0, getCartTotal() - togoDisc - appDisc + 1);', mo: 'lệch tổng cuối +1', muc: 'sau' },
+      { kb: 'ttTienMat', file: 'pos_thanh_toan.v2.js', tim: /cashChange: cashChange !== null && cashChange !== undefined \? cashChange : 0,/, thay: 'cashChange: cashChange !== null && cashChange !== undefined ? cashChange + 1 : 0,', mo: 'lệch tiền thối ghi trên đơn' },
+      { kb: 'ttChuyenKhoan', file: 'pos_thanh_toan.v2.js', tim: /db\.ref\('bank_confirmations\/' \+ orderId\)\.remove\(\)/, thay: "db.ref('bank_confirmations/' + orderId + 'x').remove()", mo: 'xoá nhầm node bank_confirmations' },
+      { kb: 'ttChuyenKhoanTay', file: 'pos_thanh_toan.v2.js', tim: /manualConfirm: true, staffId: staffEmp\.id/, thay: 'manualConfirm: true, staffId: "x"', mo: 'đổi người xác nhận tay' },
+      { kb: 'ttTinhRieng', file: 'pos_thanh_toan.v2.js', tim: /grp\.cashGiven = cashGiven \|\| subTotal;/, thay: 'grp.cashGiven = (cashGiven || subTotal) + 1;', mo: 'lệch tiền khách đưa của nhóm Tính riêng' },
+      { kb: 'ttGiamGia', file: 'pos_thanh_toan.v2.js', tim: /return Math\.max\(0, getCartTotal\(\) - togoDisc - appDisc\);/, thay: 'return Math.max(0, getCartTotal() - togoDisc - appDisc + 1);', mo: 'lệch tổng cuối +1', muc: 'sau' },
       { kb: 'ttDoiLy', file: 'pos_customers.v1.js', tim: /if \(markerRef\) t\.set\(markerRef, \{ phone, at: vnDate\(\)\.toISOString\(\) \}\);/, thay: '', mo: 'bỏ ghi dấu đổi ly' },
-      { kb: 'ttMatAck', file: 'pos_thanh_toan.v1.js', tim: /if \(!isNewBill\) \{\n      Object\.assign\(order, existingSnap\.val\(\)\);/, thay: 'if (false) {\n      Object.assign(order, existingSnap.val());', mo: 'bỏ nhánh dùng lại bill đã tồn tại (bấm lại ghi bill thứ hai)' },
+      { kb: 'ttMatAck', file: 'pos_thanh_toan.v2.js', tim: /if \(!isNewBill\) \{\n      Object\.assign\(order, existingSnap\.val\(\)\);/, thay: 'if (false) {\n      Object.assign(order, existingSnap.val());', mo: 'bỏ nhánh dùng lại bill đã tồn tại (bấm lại ghi bill thứ hai)' },
       { kb: 'batDauMe', file: 'pos_prep.v2.js', tim: /note: `Nấu \$\{p\.code/, thay: 'note: `NAU ${p.code', mo: 'đổi ghi chú dòng trừ NL khi bắt đầu nấu' }
     ];
     for (const tk of TU_KIEM) {

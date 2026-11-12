@@ -19,7 +19,7 @@ function fixture(rows,cfg={}){
   'prep_batches_gieogieo/B1':{prepName:'Kem trứng'},'prep_batches_gieogieo/B2':{prepName:'Kem trứng'},'prep_batches_gieogieo/B3':{prepName:'Kem trứng'}};
  for(const [k,v] of Object.entries(rows))seed[T+k]=v;
  const fake=makeFake({fs:seed}),ctx={console,crypto:require('node:crypto').webcrypto,setTimeout,clearTimeout};
- vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../unit_engine.v21.js'),'utf8'),ctx);
+ vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../unit_engine.v22.js'),'utf8'),ctx);
  const UE=ctx.UnitEngine;UE.init({fstore:fake.fstore,db:fake.db,FieldValue:fake.FieldValue,now:()=>NOW,storeId:'gg01',app:'quanly'});
  let t=NOW;const s=create({storeId:'gg01',fstore:fake.fstore,now:()=>t,inventory:UE});
  return {...fake,UE,s,tick:ms=>{t+=ms;}};

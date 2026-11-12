@@ -20,7 +20,7 @@ const base=(extra={})=>({
  ...recon(),...extra});
 function fx(rows,cfg={}){
  const fake=makeFake({fs:{[ROOT]:{enabled:true,mode:'active',protocolVersion:1,fleetConfirmed:true,fromDate:D,settingsRevision:1,...cfg},...rows}}),ctx={console,crypto:require('node:crypto').webcrypto,setTimeout,clearTimeout};
- vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../unit_engine.v21.js'),'utf8'),ctx);
+ vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../unit_engine.v22.js'),'utf8'),ctx);
  const UE=ctx.UnitEngine;UE.init({fstore:fake.fstore,db:fake.db,FieldValue:fake.FieldValue,now:()=>NOW,storeId:'gg01',app:'quanly'});
  return {...fake,s:create({storeId:'gg01',fstore:fake.fstore,now:()=>NOW,inventory:UE})};
 }

@@ -30,12 +30,14 @@ const anomalies=f=>Object.entries(f.FS).filter(([p])=>p.startsWith('stock_anomal
    await e.ledger.apply({itemId:'X',type:'CONSUMPTION',qty:-qty,note:'bán',staff:'',referenceId:bill,deriveFromUnits:al.length>0,businessDate:'2026-10-22',txId:bill+'_ing_X',duringPrepLock:true,...(al.length?{meta:{fifoAllocations:al}}:{})});};
   await sell('bill_1',50);now+=600000;
   const ref=f.fstore.collection('stock_containers_gieogieo').doc('B');
-  // Kho v21: mở tem KHÔNG gánh khoản bán trước khi quét (đó là việc F2 / kho v22) — giữ nguyên để thử đúng chuỗi lỗi L1.
+  // Chuỗi lỗi L1 như dữ liệu ghi TRƯỚC kho v22 (dòng Sổ lệch không có ue:22 → mở tem không gánh — F2 chỉ gánh dòng từ v22):
+  // báo hết vẫn ra WASTE −50, Engine 2 phải tự nhận ra phần đó là Sổ lệch.
+  Object.keys(f.FS).filter(p=>p.startsWith('stock_anomalies_gieogieo/')).forEach(p=>{delete f.FS[p].ue;});
   await ref.update({status:'open',openedAt:new Date(now).toISOString()});
   await e.fn.unitEngineOnOpen('B',{itemId:'X',itemName:'Sữa',code:'BBB',baseQty:1000,unit:'ml'});now+=3600000;
   await sell('bill_2',950);now+=3600000;
   await e.fn.unitEngineFinishOpenUnit('B',{...f.FS['stock_containers_gieogieo/B'],itemId:'X',code:'BBB',unit:'ml'},{id:'a',fullName:'A'},'Hết',true,ref,'',true);
-  assert.equal(f.FS['stock_transactions_gieogieo/finish_B_WASTE'].qty,-50,'kho v21 ghi WASTE −50 (chuỗi L1)');
+  assert.equal(f.FS['stock_transactions_gieogieo/finish_B_WASTE'].qty,-50,'dữ liệu trước v22: báo hết ghi WASTE −50 (chuỗi L1)');
   const before=JSON.stringify(anomalies(f));
   const s=create({storeId:'gg01',fstore:f.fstore,now:()=>now+60000});
   await s.finish('finish_B_WASTE');

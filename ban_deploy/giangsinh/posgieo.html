@@ -216,8 +216,8 @@ Nút "Cập nhật" ở sidebar (`manualCheckUpdate`, dựa trên service worker
 <!-- [TỰ PHỤC HỒI] Nạp file lần đầu thất bại (404 bị trình duyệt NHỚ vì header immutable khi HTML lên site trước file JS, hoặc mạng chập)
      → nạp lại ĐÚNG MỘT LẦN bằng địa chỉ khác (?r=1 — khác khoá cache) trước khi script chính chạy. Không đổi tên file / không cần deploy lại. (Viết '<scr'+'ipt' để tools/predeploy_check không đếm nhầm thành thẻ thứ hai; có id để các công cụ quét — chỉ lấy khối script TRẦN (không thuộc tính) đầu tiên làm script chính — không lấy nhầm.) -->
 <script id="gdRetry">if(!window.GieoData){document.write('<scr'+'ipt src="data_access.v9.js?r=1"><\/scr'+'ipt>');}</script>
-<script src="unit_engine.v21.js"></script>
-<script id="ueRetry">if(!window.UnitEngine){document.write('<scr'+'ipt src="unit_engine.v21.js?r=1"><\/scr'+'ipt>');}</script>
+<script src="unit_engine.v22.js"></script>
+<script id="ueRetry">if(!window.UnitEngine){document.write('<scr'+'ipt src="unit_engine.v22.js?r=1"><\/scr'+'ipt>');}</script>
 <!-- [TÁCH POSGIEO] JS riêng của POS Gieo trong js/posgieo/ (docs/KE_HOACH_TACH_POSGIEO_DA_CUA_HANG.md): CHỈ khai báo, nạp TRƯỚC
      script chính (5.1). Mỗi file đặt dấu PosGieoMods.<tên> = 'dang' ở câu đầu, = true ở câu cuối. Dấu CHƯA CÓ (file chưa từng chạy:
      mạng / 404 / file cụt) → nạp lại ĐÚNG MỘT LẦN (?r=1); chạy dở ('dang') thì KHÔNG nạp lại (5.3). -->
@@ -263,8 +263,8 @@ Nút "Cập nhật" ở sidebar (`manualCheckUpdate`, dựa trên service worker
 <script id="pgCartRetry">if(!window.PosGieoMods||PosGieoMods.cart===undefined){document.write('<scr'+'ipt src="js/posgieo/pos_cart.v2.js?r=1"><\/scr'+'ipt>');}</script>
 <script src="js/posgieo/pos_pick_topping.v1.js"></script>
 <script id="pgPickTpRetry">if(!window.PosGieoMods||PosGieoMods.pickTp===undefined){document.write('<scr'+'ipt src="js/posgieo/pos_pick_topping.v1.js?r=1"><\/scr'+'ipt>');}</script>
-<script src="js/posgieo/pos_thanh_toan.v1.js"></script>
-<script id="pgThanhToanRetry">if(!window.PosGieoMods||PosGieoMods.thanhtoan===undefined){document.write('<scr'+'ipt src="js/posgieo/pos_thanh_toan.v1.js?r=1"><\/scr'+'ipt>');}</script>
+<script src="js/posgieo/pos_thanh_toan.v2.js"></script>
+<script id="pgThanhToanRetry">if(!window.PosGieoMods||PosGieoMods.thanhtoan===undefined){document.write('<scr'+'ipt src="js/posgieo/pos_thanh_toan.v2.js?r=1"><\/scr'+'ipt>');}</script>
 
 <style>
 :root{--gd:#E23A5D;--gm:#C22B49;--gl:#FDE6EA;--bg:#FFFCF0;--gt:#999;--td:#111;--bb:#E7ECFB;--bi:#1D3F91;
@@ -2631,7 +2631,7 @@ else {
 // [TÁCH POSGIEO 0E — kế hoạch 5.3] JS riêng THIẾT YẾU (js/posgieo/…) phải CHẠY HẾT (dấu PosGieoMods.<tên> === true) trước khi
 // làm gì tiếp — kể cả màn nhập mã quán (dùng escHtmlPos). Thẻ #pgUiRetry đã nạp lại một lần nếu file chưa từng chạy; tới đây
 // vẫn thiếu (mạng hỏng hẳn / file chưa có trên máy chủ) hoặc file chạy dở ('dang') → màn đỏ + Tải lại, KHÔNG chạy nghiệp vụ nửa chừng.
-const POS_MODS_THIET_YEU = { ui: 'js/posgieo/pos_ui.v1.js', assist: 'js/posgieo/pos_assist.v1.js', printer: 'js/posgieo/pos_printer.v1.js', printContent: 'js/posgieo/pos_print_content.v1.js', printUi: 'js/posgieo/pos_print_ui.v1.js', receive: 'js/posgieo/pos_receive.v2.js', prep: 'js/posgieo/pos_prep.v2.js', stockUnits: 'js/posgieo/pos_stock_units.v1.js', kho: 'js/posgieo/pos_kho.v2.js', count: 'js/posgieo/pos_count.v1.js', expiry: 'js/posgieo/pos_expiry.v1.js', shift: 'js/posgieo/pos_shift.v1.js', shiftClosing: 'js/posgieo/pos_shift_closing.v2.js', handover: 'js/posgieo/pos_handover.v1.js', cashfund: 'js/posgieo/pos_cashfund.v1.js', catalogAdmin: 'js/posgieo/pos_catalog_admin.v1.js', reports: 'js/posgieo/pos_reports.v1.js', orders: 'js/posgieo/pos_orders.v1.js', customers: 'js/posgieo/pos_customers.v1.js', cart: 'js/posgieo/pos_cart.v2.js', pickTp: 'js/posgieo/pos_pick_topping.v1.js', thanhtoan: 'js/posgieo/pos_thanh_toan.v1.js' };   // trợ lý: confirmPay gọi thẳng assistFinalizeOrder; máy in: lệnh tự chạy lúc mở app dùng POSPrinter / temEnsureConnected; nội dung bill/tem + giao diện máy in/quét/in lại: thanh toán và màn máy in gọi thẳng; nhận hàng: màn Kho / automation gọi thẳng; chế biến BTP: UnitEngine.init (getPreps, phân loại đối chiếu NL) + kho / kết ca gọi thẳng; mở chai / báo hết, màn Kho / hao hụt / cân, kiểm kê: UnitEngine.init (getItems) + màn Kho / kết ca / automation gọi thẳng; hạn dùng: Việc đầu ca / chuông (setInterval expirySoonTick ở lại script chính) / check-out gọi thẳng; ca (PIN nhân viên, check-in/out, Việc đầu ca, mở ca): mọi màn ký PIN + cổng bán (requireOpeningChecklistDone) gọi thẳng; kết ca / giao ca / đóng ngày: màn Ca làm việc, check-out, cổng bán (chặn khi đã đóng ngày) gọi thẳng; quỹ tiền mặt / mở két: lưới đếm mệnh giá (cfEmptyDenoms / cfRenderDenomGrid / cfDenomTotal) của mở ca / kết ca / giao ca + cfEmptyDenoms lúc nạp script chính (_shiftOpenDenoms), nút mở két ở màn bán gọi thẳng; sửa danh mục (món / Food / topping): màn Quản lý menu, ô giá cài đặt To Go (fmtPriceInput), trình nghe click toàn trang (hideTypeDropdown) gọi thẳng; doanh thu / xếp hạng / lịch sử: todayKey dùng khắp app (giỏ, khuyến mãi, kết ca); mua thêm / chi tiết / xoá bill / bổ sung bill: thanh toán đọc _backfillMode, màn Lịch sử gọi thẳng; khách (tra cứu SĐT, tích tem / ly miễn phí theo tem, danh sách khách): ô SĐT ở giỏ / thanh toán, confirmPay (loyaltyProcessAfterPay, _finalizeStampFreeAfterPay), listener scroll / click gọi thẳng; giỏ hàng / menu bán / chọn size / topping (renderMenu, giỏ, openPO, topping có số lượng, onCheckoutClick): màn bán, mọi nút món, thanh toán, khuyến mãi, trợ lý gọi thẳng; khuyến mãi / quà / giảm giá / To Go, thanh toán (VietQR, nghe chuyển khoản, tiền mặt, confirmPay), Tính riêng: giỏ (onCheckoutClick, getFinalTotal), màn bán, trợ lý, kết ca gọi thẳng
+const POS_MODS_THIET_YEU = { ui: 'js/posgieo/pos_ui.v1.js', assist: 'js/posgieo/pos_assist.v1.js', printer: 'js/posgieo/pos_printer.v1.js', printContent: 'js/posgieo/pos_print_content.v1.js', printUi: 'js/posgieo/pos_print_ui.v1.js', receive: 'js/posgieo/pos_receive.v2.js', prep: 'js/posgieo/pos_prep.v2.js', stockUnits: 'js/posgieo/pos_stock_units.v1.js', kho: 'js/posgieo/pos_kho.v2.js', count: 'js/posgieo/pos_count.v1.js', expiry: 'js/posgieo/pos_expiry.v1.js', shift: 'js/posgieo/pos_shift.v1.js', shiftClosing: 'js/posgieo/pos_shift_closing.v2.js', handover: 'js/posgieo/pos_handover.v1.js', cashfund: 'js/posgieo/pos_cashfund.v1.js', catalogAdmin: 'js/posgieo/pos_catalog_admin.v1.js', reports: 'js/posgieo/pos_reports.v1.js', orders: 'js/posgieo/pos_orders.v1.js', customers: 'js/posgieo/pos_customers.v1.js', cart: 'js/posgieo/pos_cart.v2.js', pickTp: 'js/posgieo/pos_pick_topping.v1.js', thanhtoan: 'js/posgieo/pos_thanh_toan.v2.js' };   // trợ lý: confirmPay gọi thẳng assistFinalizeOrder; máy in: lệnh tự chạy lúc mở app dùng POSPrinter / temEnsureConnected; nội dung bill/tem + giao diện máy in/quét/in lại: thanh toán và màn máy in gọi thẳng; nhận hàng: màn Kho / automation gọi thẳng; chế biến BTP: UnitEngine.init (getPreps, phân loại đối chiếu NL) + kho / kết ca gọi thẳng; mở chai / báo hết, màn Kho / hao hụt / cân, kiểm kê: UnitEngine.init (getItems) + màn Kho / kết ca / automation gọi thẳng; hạn dùng: Việc đầu ca / chuông (setInterval expirySoonTick ở lại script chính) / check-out gọi thẳng; ca (PIN nhân viên, check-in/out, Việc đầu ca, mở ca): mọi màn ký PIN + cổng bán (requireOpeningChecklistDone) gọi thẳng; kết ca / giao ca / đóng ngày: màn Ca làm việc, check-out, cổng bán (chặn khi đã đóng ngày) gọi thẳng; quỹ tiền mặt / mở két: lưới đếm mệnh giá (cfEmptyDenoms / cfRenderDenomGrid / cfDenomTotal) của mở ca / kết ca / giao ca + cfEmptyDenoms lúc nạp script chính (_shiftOpenDenoms), nút mở két ở màn bán gọi thẳng; sửa danh mục (món / Food / topping): màn Quản lý menu, ô giá cài đặt To Go (fmtPriceInput), trình nghe click toàn trang (hideTypeDropdown) gọi thẳng; doanh thu / xếp hạng / lịch sử: todayKey dùng khắp app (giỏ, khuyến mãi, kết ca); mua thêm / chi tiết / xoá bill / bổ sung bill: thanh toán đọc _backfillMode, màn Lịch sử gọi thẳng; khách (tra cứu SĐT, tích tem / ly miễn phí theo tem, danh sách khách): ô SĐT ở giỏ / thanh toán, confirmPay (loyaltyProcessAfterPay, _finalizeStampFreeAfterPay), listener scroll / click gọi thẳng; giỏ hàng / menu bán / chọn size / topping (renderMenu, giỏ, openPO, topping có số lượng, onCheckoutClick): màn bán, mọi nút món, thanh toán, khuyến mãi, trợ lý gọi thẳng; khuyến mãi / quà / giảm giá / To Go, thanh toán (VietQR, nghe chuyển khoản, tiền mặt, confirmPay), Tính riêng: giỏ (onCheckoutClick, getFinalTotal), màn bán, trợ lý, kết ca gọi thẳng
 {
   const thieu = Object.keys(POS_MODS_THIET_YEU).filter(k => !(window.PosGieoMods && window.PosGieoMods[k] === true));
   if (thieu.length) {
@@ -3739,10 +3739,13 @@ async function _recheckCloseAfterSalesImplPOS() {
   const date = shiftState.businessDate;
   const closeRef = fstore.collection('daily_closings_gieogieo').doc(date);
   const closeSnap = await closeRef.get();
-  if (!closeSnap.exists) { await loadCloseDayOrdersPOS(date); return false; }
+  // [F4] Vào kết ca: đơn trong ngày vừa tải mới → chạy nốt việc trừ kho của bill dở (nền, nhân viên không chờ).
+  const _f4Resume = () => { resumeMainConsumeJobsPOS('ket_ca').catch(err => console.warn('[F4] chạy nốt trừ kho lỗi', err)); };
+  if (!closeSnap.exists) { await loadCloseDayOrdersPOS(date); _f4Resume(); return false; }
   const closing = closeSnap.data();
   if (closing.status === 'closed') return false;
   const dayOrders = await loadCloseDayOrdersPOS(date);
+  _f4Resume();
   const handoverLines = closing.handoverCloseLines || [];
   const prepLines = closing.prepCountLines || [];
   const shiftInvLines = closing.shiftInventoryCloseLines || [];
@@ -4172,11 +4175,11 @@ auth.signInWithEmailAndPassword(POS_AUTH_EMAIL, POS_AUTH_PASS)
     }
   });
 
-// resetTogoToggle, loadTogoSettings, saveTogoSettingsLocal, … saveTgFreeTp, _freeTpUnits (32 tên) → js/posgieo/pos_thanh_toan.v1.js       // danh sách cart-key (mỗi ly) đang được xử lý trong phiên tặng topping hiện tại
-// _freeTpActiveKey → js/posgieo/pos_thanh_toan.v1.js // cart-key của ly đang mở ở tầng 2
-// _freeTpSelectedId, isFreeTpEligibleItem, renderFreeTpReminder, … giftSizeNotePOS, togoDiscountAmt (20 tên) → js/posgieo/pos_thanh_toan.v1.js // amount to deduct from total
+// resetTogoToggle, loadTogoSettings, saveTogoSettingsLocal, … saveTgFreeTp, _freeTpUnits (32 tên) → js/posgieo/pos_thanh_toan.v2.js       // danh sách cart-key (mỗi ly) đang được xử lý trong phiên tặng topping hiện tại
+// _freeTpActiveKey → js/posgieo/pos_thanh_toan.v2.js // cart-key của ly đang mở ở tầng 2
+// _freeTpSelectedId, isFreeTpEligibleItem, renderFreeTpReminder, … giftSizeNotePOS, togoDiscountAmt (20 tên) → js/posgieo/pos_thanh_toan.v2.js // amount to deduct from total
 
-// checkTogoBeforeCheckout, giftSizeForPOS, giftRefPricePOS, … confirmTogoGift, getCartTotalWithDiscount (12 tên) → js/posgieo/pos_thanh_toan.v1.js
+// checkTogoBeforeCheckout, giftSizeForPOS, giftRefPricePOS, … confirmTogoGift, getCartTotalWithDiscount (12 tên) → js/posgieo/pos_thanh_toan.v2.js
 
 // ============================================================
 // TỔNG TIỀN & GIẢM GIÁ — dùng chung mọi luồng thanh toán
@@ -4189,7 +4192,7 @@ auth.signInWithEmailAndPassword(POS_AUTH_EMAIL, POS_AUTH_PASS)
 // quy tắc đó không còn ý nghĩa, To Go và Bán qua App vẫn cộng bình thường như cũ.
 // ============================================================
 
-// getFinalTotal, computeAllDiscounts → js/posgieo/pos_thanh_toan.v1.js
+// getFinalTotal, computeAllDiscounts → js/posgieo/pos_thanh_toan.v2.js
 
 // ============================================================
 // 1. NHÁNH MENU — onValue realtime qua Firebase SDK
@@ -5493,7 +5496,71 @@ async function applySalesConsumptionPOS(order, orderId, businessDate) {
   const prev = _salesConsumeChains.get(orderId) || Promise.resolve();
   const run = prev.catch(() => {}).then(() => _applySalesConsumptionCorePOS(order, orderId, businessDate));
   _salesConsumeChains.set(orderId, run);
-  try { return await run; } finally { if (_salesConsumeChains.get(orderId) === run) _salesConsumeChains.delete(orderId); }
+  let res;
+  try { res = await run; return res; }
+  finally {
+    if (_salesConsumeChains.get(orderId) === run) _salesConsumeChains.delete(orderId);
+    // [F4] Bill có việc trừ kho bền (pos_thanh_toan.v2) → ghi kết quả (nền, lỗi không ảnh hưởng bill).
+    if (order && order.consumeJobs && order.consumeJobs.main) _mainConsumeJobMarkPOS(order, orderId, !!(res && res.ok)).catch(err => console.warn('[F4] không ghi được trạng thái việc trừ kho bill', orderId, err));
+  }
+}
+
+// ============================================================
+// [F4 12/11/2026 — docs/KE_HOACH_FIX_TRU_KHO_HAO_HUT_12-11.md] VIỆC TRỪ KHO BỀN CỦA BILL CHÍNH
+// Bill mới ghi kèm `consumeJobs.main = {status:'pending', at}` CÙNG lần ghi bill (pos_thanh_toan.v2 — không thêm vòng mạng vào thanh toán).
+// Trừ kho xong → 'done'; có dòng lỗi → 'failed' (tries). Trạng thái: pending → done | failed(≤ 3 lần) ; cancelled (xoá bill — pos_orders).
+// App tắt giữa chừng → MỞ APP (sau khi tải đơn) và VÀO KẾT CA chạy nốt: bill của ngày đang mở, việc chưa xong quá 2 phút (máy khác có thể
+// đang chạy dở), không xoá dở, không bổ sung. Chạy lại an toàn: dòng sổ txId cố định + dấu chống lặp trên tem (kho v22 F3) — tem đã trừ mà
+// sổ chưa ghi thì KHÔNG trừ lần hai. Danh sách đơn đã nằm sẵn trong bộ nhớ POS; chỉ đọc RT nhỏ của chính việc để chắc trạng thái mới nhất.
+// ============================================================
+const MAIN_JOB_STALE_MS = 2 * 60 * 1000;
+const MAIN_JOB_MAX_TRIES = 3;
+function _mainJobPathPOS(o, orderId) {
+  const [dd, mm] = String((o && o.date) || '').split('/');
+  const mi = parseInt(mm, 10) - 1;
+  return dd && mi >= 0 && mi < 12 ? 'orders_gieogieo/' + MONTH_KEYS[mi] + '/' + dd + '/' + orderId + '/consumeJobs/main' : null;
+}
+async function _mainConsumeJobMarkPOS(order, orderId, ok) {
+  const path = _mainJobPathPOS(order, orderId);
+  if (!path) return;
+  let after = null;
+  await db.ref(path).transaction(j => {
+    after = null;
+    if (!j || j.status === 'done' || j.status === 'cancelled') return;   // bill đã xoá / việc đã chốt → không ghi
+    after = ok ? { ...j, status: 'done', doneAt: Date.now() } : { ...j, status: 'failed', tries: (Number(j.tries) || 0) + 1, failedAt: Date.now() };
+    return after;
+  });
+  const local = (orders || []).find(x => x && x.id === orderId);
+  if (after && local) local.consumeJobs = { ...(local.consumeJobs || {}), main: after };
+}
+function _mainJobDuePOS(j, nowMs) {
+  return !!j && (j.status === 'pending' || (j.status === 'failed' && (Number(j.tries) || 0) < MAIN_JOB_MAX_TRIES))
+    && nowMs - (Number(j.failedAt) || Number(j.at) || 0) > MAIN_JOB_STALE_MS;
+}
+let _mainJobResumeBusyPOS = null;
+function resumeMainConsumeJobsPOS(reason) {
+  if (_mainJobResumeBusyPOS) return _mainJobResumeBusyPOS;
+  _mainJobResumeBusyPOS = _resumeMainConsumeJobsImplPOS(reason).finally(() => { _mainJobResumeBusyPOS = null; });
+  return _mainJobResumeBusyPOS;
+}
+async function _resumeMainConsumeJobsImplPOS(reason) {
+  const bd = (typeof shiftState !== 'undefined' && shiftState && shiftState.businessDate) || posDateKey();
+  const display = bd.split('-').reverse().join('/'), nowMs = Date.now();   // 'YYYY-MM-DD' → 'DD/MM/YYYY' (như posDateKeyToDisplay)
+  const due = (orders || []).filter(o => o && o.id && o.date === display && !o.backfilled && !o.deletionPending
+    && o.consumeJobs && _mainJobDuePOS(o.consumeJobs.main, nowMs)
+    && !_consumptionInflightPOS.has(o.id) && !_salesConsumeChains.has(o.id) && !(typeof _deletingOrderIds !== 'undefined' && _deletingOrderIds.has(o.id)));
+  let ran = 0;
+  for (const o of due) {
+    const path = _mainJobPathPOS(o, o.id);
+    let live;
+    try { live = path ? (await db.ref(path).once('value')).val() : null; } catch (e) { continue; }   // không đọc được → để lần sau
+    o.consumeJobs = { ...(o.consumeJobs || {}), main: live || o.consumeJobs.main };
+    if (!_mainJobDuePOS(live, Date.now())) continue;
+    console.info('[F4] chạy nốt trừ kho bill dở', o.billCode || o.id, reason || '');
+    ran++;
+    await trackConsumptionPOS(o.id, applySalesConsumptionPOS(o, o.id, bd));
+  }
+  return ran;
 }
 async function _applySalesConsumptionCorePOS(order, orderId, businessDate) {
   try {
@@ -5527,7 +5594,7 @@ async function _applySalesConsumptionCorePOS(order, orderId, businessDate) {
         orderId, billCode: (order && order.billCode) || '', businessDate: businessDate || posDateKey(),
         createdAt: vnDate().toISOString(), ingredients: {}, preps: {}, noStockLines: true
       }, { merge: true }).catch(() => {});
-      return;
+      return { ok: true };
     }
     // [MỚI — đóng vòng truy xuất "bill → tem"] fifoAllocations/unitAllocations trước giờ chỉ
     // nằm trên từng dòng ledger CONSUMPTION, phục vụ đúng một việc: hoàn ngược lúc xoá đơn. Muốn
@@ -5570,13 +5637,15 @@ async function _applySalesConsumptionCorePOS(order, orderId, businessDate) {
         try { txDoc = await fstore.collection('stock_transactions_gieogieo').doc(txId).get(); }
         catch (checkErr) { throw new Error('Không xác định được trạng thái ledger — không chạy FIFO: ' + (checkErr.message || checkErr)); }
         if (txDoc.exists) return { alreadyApplied: true };
-        const allocations = await UnitEngine.consume.allocate(ingId, qty, undefined, { type: 'order', id: orderId, note: note, businessDate, backfillAfterClose: isBackfillAfterClose, duringPrepLock: true })
+        // [v22 F3] opId = txId: dấu chống lặp trên tem (thử lại khi RT lỗi / chạy nốt bill dở không trừ tem lần hai).
+        const allocations = await UnitEngine.consume.allocate(ingId, qty, undefined, { type: 'order', id: orderId, note: note, businessDate, backfillAfterClose: isBackfillAfterClose, duringPrepLock: true, opId: txId })
           .catch(err => { console.warn('[FIFO] phân bổ lỗi', ingId, err); return []; });
         ingredientAllocations[ingId] = { qty, allocations };
         try {
           const applied = await UnitEngine.ledger.apply({
             itemId: ingId, type: 'CONSUMPTION', qty: -qty,
             note, staff: '', referenceId: orderId,
+            rtError: !!allocations.rtError,   // [v22 F3] lỗi kết nối lúc trừ tem → Sổ lệch 'rt_error' (không phải «chưa quét mở tem»)
             deriveFromUnits: allocations.length > 0,
             businessDate, txId, duringPrepLock: true,   // bán trong lúc NL khoá cân cho mẻ: vẫn trừ, gắn mẻ để cân sau tách ra
             ...((allocations.length || isBackfillAfterClose) ? { meta: {
@@ -5585,7 +5654,8 @@ async function _applySalesConsumptionCorePOS(order, orderId, businessDate) {
             } } : {})
           });
           // Máy khác đã ghi sổ bill này giữa lúc kiểm tra và ghi → phần RT vừa trừ THÊM phải hoàn (kiểm tra hoàn đủ; chưa đủ thì engine lưu việc phục hồi bền + cảnh báo).
-          if (applied && applied.alreadyApplied && allocations.length) await UnitEngine.consume.compensateDuplicate('item', ingId, allocations, txId);
+          // [v22 F3] Phân bổ có dấu chống lặp (opMarked) không bao giờ trừ thêm cho cùng txId → chỉ hoàn khi bill đã bị xoá (cancelled).
+          if (applied && applied.alreadyApplied && allocations.length && (applied.cancelled || !allocations.opMarked)) await UnitEngine.consume.compensateDuplicate('item', ingId, allocations, txId);
           return applied;
         } catch (err) {
           if (allocations.length) {
@@ -5594,7 +5664,7 @@ async function _applySalesConsumptionCorePOS(order, orderId, businessDate) {
             catch (checkErr) { console.warn('[UnitEngine] không kiểm tra lại được ledger, KHÔNG hoàn để tránh hoàn nhầm', ingId, checkErr); actuallyCommitted = true; }
             if (!actuallyCommitted) {
               try {
-                const rv = await UnitEngine.consume.reverseClaimed('salesfail_' + txId, ingId, allocations);
+                const rv = await UnitEngine.consume.reverseClaimed('salesfail_' + txId, ingId, allocations, undefined, undefined, { unmarkOp: txId });   // [v22 F3] gỡ dấu cùng lượt hoàn
                 // ambiguous:true (claim còn kẹt 'claiming') vẫn đáng recompute — RT có thể đã
                 // được hoàn thật ở lượt trước, chỉ là claim chưa kịp ghi 'done'.
                 if (rv.ambiguous || rv.appliedQty >= rv.totalQty - 1e-6) await UnitEngine.stock.recompute(ingId, STOCK_CONTAINERS_COLL).catch(() => {});
@@ -5657,6 +5727,7 @@ async function _applySalesConsumptionCorePOS(order, orderId, businessDate) {
       const msg = alerts.map(a => `${a.itemName} (~1 ${a.packLabel} tại ${a.destLocationName})`).join(', ');
       toast(`🚚 Cần refill: ${msg}`);
     }
+    return { ok: !failedLines.length };   // [F4] trạng thái việc trừ kho bền của bill (consumeJobs.main)
   } catch (err) {
     // Không chặn thanh toán — chỉ log, đúng nguyên tắc "tiêu hao lý thuyết" không phải bước bắt buộc.
     console.warn('[GOGS] applySalesConsumptionPOS lỗi (không ảnh hưởng bill):', err);
@@ -5674,6 +5745,7 @@ async function _applySalesConsumptionCorePOS(order, orderId, businessDate) {
       errorMessage: String((err && (err.message || err.code)) || err || ''),
       note: 'Đọc định mức/bao bì/topping lỗi (mạng chập chờn hoặc Firestore không truy cập được) — không có dòng ledger CONSUMPTION nào cho đơn này. Đối soát thủ công: mở đơn, đọc itemsArray, tính tiêu hao lý thuyết và ghi ADJUSTMENT bù.'
     }, { merge: true }).catch(() => {});
+    return { ok: false };
   }
 }
 
@@ -5952,7 +6024,8 @@ function stCloseIsland() {
 function loadMenu() {
   buildFilterBar();
   renderMenu();
-  loadRecentOrders(); // load 3 ngày gần nhất từ RT
+  // load 3 ngày gần nhất từ RT; [F4] xong thì chạy nốt việc trừ kho của bill dở (nền, không chặn bán)
+  loadRecentOrders().then(() => resumeMainConsumeJobsPOS('mo_app')).catch(err => console.warn('[F4] chạy nốt trừ kho lỗi', err));
 }
 
 // ─── Real-time listeners cho 3 ngày gần nhất ───────────────────────────────
@@ -6344,11 +6417,11 @@ function rvPassCancel() {
 
 // fmtK, fmt, getCartTotal, … addCart, onCheckoutClick (18 tên) → js/posgieo/pos_cart.v1.js
 
-// updCoTotal, renderScCartPreview, selM, … _vietqrOnConfirm, _vietqrMode (9 tên) → js/posgieo/pos_thanh_toan.v1.js // 'main' | 'split'
+// updCoTotal, renderScCartPreview, selM, … _vietqrOnConfirm, _vietqrMode (9 tên) → js/posgieo/pos_thanh_toan.v2.js // 'main' | 'split'
 
-// openVietQRPopup, closeVietQRPopup, _bankConfirmMetaFromCallbackData, _bankConfirmMeta → js/posgieo/pos_thanh_toan.v1.js // đọc 1 lần trong confirmPay() rồi tự xoá — xem _vietqrOnConfirm ở trên
+// openVietQRPopup, closeVietQRPopup, _bankConfirmMetaFromCallbackData, _bankConfirmMeta → js/posgieo/pos_thanh_toan.v2.js // đọc 1 lần trong confirmPay() rồi tự xoá — xem _vietqrOnConfirm ở trên
 
-// _bankConfirmBadgeHTML, openManualBankConfirm, cancelManualBankConfirm, … stopBankListener, calcChange (10 tên) → js/posgieo/pos_thanh_toan.v1.js
+// _bankConfirmBadgeHTML, openManualBankConfirm, cancelManualBankConfirm, … stopBankListener, calcChange (10 tên) → js/posgieo/pos_thanh_toan.v2.js
 
 // ============================================================
 // 3. NHÁNH CUSTOMER — Tra cứu & Voucher qua Firebase SDK
@@ -6364,7 +6437,7 @@ function rvPassCancel() {
 
 // loyaltyTodayStr, _LOYALTY_PENDING_LS_KEY, _loyaltyPendingRead, … loyaltyAddStamps, loyaltyProcessAfterPay (22 tên) → js/posgieo/pos_customers.v1.js
 
-// proceedPay, resetPayMethod, openCashScreen, … confirmCashPay, confirmPay (12 tên) → js/posgieo/pos_thanh_toan.v1.js
+// proceedPay, resetPayMethod, openCashScreen, … confirmCashPay, confirmPay (12 tên) → js/posgieo/pos_thanh_toan.v2.js
 
 // todayKey, weekStart, openDatePicker, … renderH, filterH (16 tên) → js/posgieo/pos_reports.v1.js
 
@@ -6573,13 +6646,13 @@ document.addEventListener('click', e => {
 // openToppingPickerSplit, showSplitQtyPopup, doSplitAndOpen, tpQty, tpSum, tpLabel → js/posgieo/pos_cart.v1.js // bỏ ×1 cho đỡ rườm rà
 // tpCount, openToppingPicker, closeToppingPicker, setCartToppingQty, addCartTopping, removeCartTopping → js/posgieo/pos_cart.v1.js
 
-// spItems → js/posgieo/pos_thanh_toan.v1.js        // { name, size, price, paid: false }
-// spPaidAmt, spSelected, _spCurrentMethod → js/posgieo/pos_thanh_toan.v1.js // 'cash' | 'bank' cho popup hiện tại
-// spGroups → js/posgieo/pos_thanh_toan.v1.js       // [{ method, items:[{name,size,price}], total, cashGiven?, cashChange? }]
+// spItems → js/posgieo/pos_thanh_toan.v2.js        // { name, size, price, paid: false }
+// spPaidAmt, spSelected, _spCurrentMethod → js/posgieo/pos_thanh_toan.v2.js // 'cash' | 'bank' cho popup hiện tại
+// spGroups → js/posgieo/pos_thanh_toan.v2.js       // [{ method, items:[{name,size,price}], total, cashGiven?, cashChange? }]
 
-// openSplitPay, spGrandTotal → js/posgieo/pos_thanh_toan.v1.js // tổng thực thu của bill Tính riêng (đã trừ mọi giảm giá)
+// openSplitPay, spGrandTotal → js/posgieo/pos_thanh_toan.v2.js // tổng thực thu của bill Tính riêng (đã trừ mọi giảm giá)
 
-// applySplitBillDiscount, renderSpItems, toggleSpItem, … closeSpBankPopup, finalizeSplitPay (16 tên) → js/posgieo/pos_thanh_toan.v1.js
+// applySplitBillDiscount, renderSpItems, toggleSpItem, … closeSpBankPopup, finalizeSplitPay (16 tên) → js/posgieo/pos_thanh_toan.v2.js
 
 // allCustomersCache, CUST_AC_LS, _custAcDay → js/posgieo/pos_customers.v1.js       // ngày (posDateKey) của bản danh sách đang có
 // _custAcLoading → js/posgieo/pos_customers.v1.js   // lượt tải đang chạy — gọi trùng thì bỏ qua

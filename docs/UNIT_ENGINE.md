@@ -1,4 +1,4 @@
-# Unit Engine — tài liệu API (bản hiện hành `unit_engine.v19.js`; v1–v18 giữ để quay lui)
+# Unit Engine — tài liệu API (bản hiện hành `unit_engine.v22.js`; v1–v21 giữ để quay lui — thay đổi v22 ở mục cuối)
 
 > Phần API bên dưới viết ở v7; thay đổi từ v8 → v19 ghi theo từng mục cuối file.
 
@@ -21,6 +21,7 @@ Bất biến (chi tiết ở mục 2 kế hoạch):
 | B9 | Chống ghi đè tồn bằng mốc `_ueLastRecomputeStart`. Từ E6 mốc này dùng **giờ máy chủ**. |
 | B10–B11 | Bù lệch RT–Firestore. BTP: tồn = phần dương, phần âm vào `pendingShortage`. |
 | B12–B15 | Khoá NL khi cân mẻ. Ghi tuyệt đối có chống ghi đè. Mã 8 ký tự không trùng. Tem cái rời. |
+| B16 | (v22) Mở tem gánh khoản «bán khi chưa có tem mở» (Sổ lệch `no_open_tem`) của món — như gánh nợ. |
 
 ## 2. Nạp và khởi tạo
 
@@ -362,3 +363,15 @@ Giới hạn còn lại: kiểm dấu huỷ cho hoàn do sửa topping nằm nga
 - `lifecycle.finish`: `_finishPending` giữ số RT/người/lý do thật trước khi chốt, WASTE `finish_{containerId}_WASTE` chống lặp. Số dương chờ hoàn tất không được phân bổ tiếp; lỗi giữ trạng thái để bấm lại. Chỉ đóng mã sau khi ghi WASTE xong, mã đã finished không ghi thêm WASTE. RT mất mà mã còn open và không có dấu thì dừng đối soát, không dùng số form.
 - API công khai giữ nguyên. Luồng bán bình thường không thêm đọc/listener; thêm 1 đọc doc ở thao tác báo hết và xác nhận nguồn khi mở mã gánh nợ. Không thêm collection hay sửa dữ liệu thật trong lượt phát triển.
 - Chi tiết, giới hạn và kiểm thử: `docs/KHO_FIFO_NANG_CAO.md`.
+
+## Kho v22 — 12/11/2026 (chưa deploy) — `docs/KE_HOACH_FIX_TRU_KHO_HAO_HUT_12-11.md` (F2 + F3)
+
+- `consume.allocate(itemId, qty, coll, ref)`: `ref.opId` (MỚI, nên truyền = txId dòng sổ sẽ ghi) → dấu chống lặp `lastConsumeOps` (vòng 30 lượt / tem: `{k, q}`) ghi CÙNG transaction trừ. Gọi lại cùng `opId` (thử lại, mất ACK, chạy nốt bill dở) KHÔNG trừ lần hai, trả lại phân bổ cũ kèm cờ `replayed`. Có `opId` → RT lỗi thì thử lại ≤ 2 lần (250 + 500 ms). Kết quả là mảng như cũ, thêm cờ: `opMarked` (có dấu — lượt trùng cùng mã không bao giờ trừ thêm, nơi gọi KHÔNG cần `compensateDuplicate` trừ khi bill đã xoá), `replayed`, `rtError` (thử hết vẫn lỗi; mảng rỗng). Không có `opId`: như v21 (không thử lại).
+- `ledger.apply({... rtError})` (MỚI): khoản ngoài tem do lỗi kết nối → Sổ lệch `kind:'rt_error'` (trước: `no_open_tem`). Không truyền cờ thì engine tự nhận khi `txId` trùng mã lượt vừa lỗi hoặc cùng món vừa lỗi trong 15 giây. Sổ lệch ghi từ v22 mang `ue:22`.
+- `consume.reverse(itemId, allocations, coll, idemKey, opts)` / `consume.reverseClaimed(claimId, itemId, allocations, coll, idemKey, opts)`: `opts.unmarkOp` gỡ dấu của lượt đó CÙNG transaction hoàn (sổ chưa ghi → hoàn tem + gỡ dấu → lần chạy lại trừ thật).
+- Cảnh báo `allocate_rtdb_error` / `untracked_unit_consumption`: tra tên món không còn ném lỗi (trước: thiếu bộ nhớ đệm món → cảnh báo bị nuốt); thiếu đệm thì đọc doc món.
+- `lifecycle.open` / `fn.unitEngineOnOpen` (B16): đọc doc món + Sổ lệch đang mở của món (một truy vấn có giới hạn) TRƯỚC transaction RT; gánh dòng `no_open_tem` (`ue:22`, chưa lần mở tem nào xét, ≤ 3 ngày) khi không còn tem khác đang mở, ≤ dung tích − nợ. Dòng ứng viên mà lần mở này KHÔNG gánh (có tem khác đang mở / vượt dung tích) được đánh dấu `absorbSkippedBy/absorbSkippedAt` — tem mở sau không gánh lại. KHÔNG ghi gì lên doc món (danh mục đồng bộ giữa các quán). RT trừ + dấu `_anomCarry` cùng transaction; Firestore (transaction đọc-rồi-ghi) đặt dòng Sổ lệch `status:'absorbed'` (hết) hoặc `absorbedQty` (một phần, vẫn `open`) + `absorbedBy/absorbedAt`, dòng sổ gốc `absorbedIntoContainerId/absorbedAt/absorbedAllocations`; rồi gỡ dấu. Dòng bị đóng / gánh nơi khác giữa chừng → trả lại tem. Mất mạng giữa hai pha: mở lại hoặc báo hết mã đó chạy nốt (dấu kiểm trong transaction báo hết sẵn có, như `_fifoCarry`).
+- Xoá bill (`consume.reverseSales`): `absorbedAllocations` được hoàn như `fifoAllocations` → hàng của bill đã được gánh trả về đúng tem đó.
+- `ANNOTATABLE`: sổ thêm `absorbedIntoContainerId`, `absorbedAt`, `absorbedAllocations`; Sổ lệch thêm `absorbedBy`, `absorbedQty`, `absorbedAt`, `absorbSkippedBy`, `absorbSkippedAt`.
+- Đường bán bình thường: không thêm lượt đọc / vòng mạng (dấu nằm trong transaction trừ sẵn có). Mở tem NL: +1 đọc doc món + 1 truy vấn Sổ lệch (ghi thêm chỉ khi có dòng Sổ lệch). Ảnh chụp hành vi lõi: phần chênh có chủ ý ở `tests/snapshots/core.v22.json` (4 kịch bản: dấu trên lô BTP, `ue:22`).
+- Test: `tests/tru_tem_thu_lai.test.js` (F3), `tests/mo_tem_ganh_ngoai_tem.test.js` (F2), `tests/bill_tru_kho_ben.test.js` (F4, POS).

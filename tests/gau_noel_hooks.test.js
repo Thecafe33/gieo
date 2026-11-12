@@ -62,7 +62,7 @@ function khaiBao(src, ten) {
 
 // ── posgieo: assistFinalizeOrder(order, orderId) + hàm in bill/khách/xoá bill nằm trong module nạp TRƯỚC thẻ gấu
 {
-  const html = rd('posgieo.html'), th = rd('js/posgieo/pos_thanh_toan.v1.js'), as = rd('js/posgieo/pos_assist.v1.js');
+  const html = rd('posgieo.html'), th = rd('js/posgieo/pos_thanh_toan.v2.js'), as = rd('js/posgieo/pos_assist.v1.js');
   const kb = khaiBao(as, 'assistFinalizeOrder');
   chk(kb && kb.join() === 'order,orderId', 'Gieo: assistFinalizeOrder(order, orderId) đúng thứ tự phần gắn đọc', kb);
   const g = loiGoi(th, 'assistFinalizeOrder');

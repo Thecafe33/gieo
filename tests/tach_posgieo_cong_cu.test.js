@@ -12,7 +12,7 @@ const RETRY = `<script id="pgUiRetry">if(!window.PosGieoMods||PosGieoMods.ui===u
 const APP = (extra, body) => `<!doctype html><html><head><title>App</title></head><body>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore-compat.js"></script>
 <script src="data_access.v9.js"></script>
-<script src="unit_engine.v21.js"></script>
+<script src="unit_engine.v22.js"></script>
 ${extra || ''}
 <script>
 if (!firebase.apps.length) firebase.initializeApp({});
@@ -68,7 +68,7 @@ ${body || 'function chinh(){ return escHtmlPos("<b>"); }'}
 {
   const r = tmp();
   w(r, 'tools/tao_ban_thu.js', fs.readFileSync(path.join(ROOT, 'tools/tao_ban_thu.js')));
-  for (const f of ['che_do_thu.v1.js', 'unit_engine.v21.js', 'data_access.v9.js']) w(r, f, fs.readFileSync(path.join(ROOT, f)));
+  for (const f of ['che_do_thu.v1.js', 'unit_engine.v22.js', 'data_access.v9.js']) w(r, f, fs.readFileSync(path.join(ROOT, f)));
   const extra = '<script src="js/posgieo/pos_ui.v1.js"></script>\n' + RETRY;
   w(r, 'posgieo.html', APP(extra)); w(r, 'quanlygieo.html', APP(''));
   w(r, 'js/posgieo/pos_ui.v1.js', 'function escHtmlPos(s){return s}');
@@ -88,7 +88,7 @@ ${body || 'function chinh(){ return escHtmlPos("<b>"); }'}
   w(r, 'tools/tao_ban_dem.js', fs.readFileSync(path.join(ROOT, 'tools/tao_ban_dem.js')));
   w(r, 'tools/dem_luot_doc.js', fs.readFileSync(path.join(ROOT, 'tools/dem_luot_doc.js')));
   w(r, 'tools/tach_posgieo/nguon.js', fs.readFileSync(path.join(ROOT, 'tools/tach_posgieo/nguon.js')));
-  for (const f of ['unit_engine.v21.js', 'data_access.v9.js']) w(r, f, fs.readFileSync(path.join(ROOT, f)));
+  for (const f of ['unit_engine.v22.js', 'data_access.v9.js']) w(r, f, fs.readFileSync(path.join(ROOT, f)));
   const extra = '<script src="js/posgieo/pos_ui.v1.js"></script>\n' + RETRY;
   w(r, 'posgieo.html', APP(extra)); w(r, 'quanlygieo.html', APP(''));
   w(r, 'js/posgieo/pos_ui.v1.js', 'function escHtmlPos(s){return s}');
@@ -103,7 +103,7 @@ ${body || 'function chinh(){ return escHtmlPos("<b>"); }'}
 // ── T7 rào ranh giới / đường dẫn bắt lỗi nằm trong js/posgieo ──
 {
   const r = tmp();
-  for (const f of ['data_access.v9.js', 'unit_engine.v21.js']) w(r, f, fs.readFileSync(path.join(ROOT, f)));
+  for (const f of ['data_access.v9.js', 'unit_engine.v22.js']) w(r, f, fs.readFileSync(path.join(ROOT, f)));
   w(r, 'posgieo.html', APP('<script src="js/posgieo/xau.v1.js"></script>'));
   w(r, 'quanlygieo.html', APP(''));
   w(r, 'js/posgieo/xau.v1.js', "function ghiKhoXau(){ return fstore.collection('stock_transactions_gieogieo').add({ qty: 1 }); }\nfunction bangLa(){ return fstore.collection('bang_chua_dang_ky_gieogieo').get(); }\n");
@@ -118,7 +118,7 @@ ${body || 'function chinh(){ return escHtmlPos("<b>"); }'}
 // ── T7b: hàm ở js/posgieo dùng HẰNG tên bảng khai báo ở HTML → check_paths vẫn phân giải được tên (không thành «động») ──
 {
   const r = tmp();
-  for (const f of ['data_access.v9.js', 'unit_engine.v21.js']) w(r, f, fs.readFileSync(path.join(ROOT, f)));
+  for (const f of ['data_access.v9.js', 'unit_engine.v22.js']) w(r, f, fs.readFileSync(path.join(ROOT, f)));
   w(r, 'posgieo.html', APP('<script src="js/posgieo/dung_hang.v1.js"></script>', "const BANG_LA = 'bang_chua_dang_ky_gieogieo';\nfunction chinh(){ return 1; }"));
   w(r, 'quanlygieo.html', APP(''));
   w(r, 'js/posgieo/dung_hang.v1.js', 'function docBang(){ return fstore.collection(BANG_LA).get(); }\n');
@@ -151,7 +151,7 @@ ${body || 'function chinh(){ return escHtmlPos("<b>"); }'}
   const HJS = [{ source: '/js/posgieo/**', headers: [{ key: 'Cache-Control', value: 'public, max-age=31536000, immutable' }] }];
   // bộ thật có thể chưa / đã có js/posgieo → bảo đảm posgieo.html nạp pos_ui.v1.js và file có mặt
   const goc = fs.readFileSync(path.join(pub, 'posgieo.html'), 'utf8');
-  if (!/src="js\/posgieo\/pos_ui\.v1\.js"/.test(goc)) fs.writeFileSync(path.join(pub, 'posgieo.html'), goc.replace('<script src="unit_engine.v21.js"></script>', '<script src="unit_engine.v21.js"></script>\n<script src="js/posgieo/pos_ui.v1.js"></script>'));
+  if (!/src="js\/posgieo\/pos_ui\.v1\.js"/.test(goc)) fs.writeFileSync(path.join(pub, 'posgieo.html'), goc.replace('<script src="unit_engine.v22.js"></script>', '<script src="unit_engine.v22.js"></script>\n<script src="js/posgieo/pos_ui.v1.js"></script>'));
   if (!fs.existsSync(path.join(pub, 'js/posgieo/pos_ui.v1.js'))) w(pub, 'js/posgieo/pos_ui.v1.js', '//');
   const banJs = fs.readFileSync(path.join(pub, 'js/posgieo/pos_ui.v1.js'));
   fj(HJS);

@@ -1,0 +1,42 @@
+ĐỢT DEPLOY 12/11/2026 — Sửa lỗ hổng trừ kho / hao hụt (F1–F4, docs/KE_HOACH_FIX_TRU_KHO_HAO_HUT_12-11.md).
+Chủ dự án duyệt 12/11: F2 mặc định (gánh Sổ lệch ≤ 3 ngày), F3 thử lại, F4 tự chạy nốt; không rà dữ liệu cũ.
+Không thêm màn / bước / chữ nào cho nhân viên. Không thêm vòng mạng vào thanh toán.
+Giải nén gói vào: /sdcard/Download/Giải nén codex/dot_12-11_tru_kho_v22/
+
+GÓI NÀY GỒM LUÔN gói dot_11-11_engine2_v5 (Engine 2 v5 + F1) → nếu chưa deploy gói 11/11 thì CHỈ cần deploy gói này.
+posgieo.html / posgieo_thu.html trong gói đã gồm Gấu Noel v3 → deploy gói dot_10-11_gau_noel TRƯỚC (hoặc cùng lúc) và
+KHÔNG chép đè posgieo.html / posgieo_thu.html của các gói cũ lên bản của gói này.
+Cần CẢ Hosting lẫn Functions (Functions dùng kho v22 khi Engine 2 cân / báo hết). Thứ tự: Hosting trước, Functions sau.
+
+1) HOSTING — chép đè 9 file + 1 file trong thư mục con rồi deploy:
+   cd "/sdcard/Download/Giải nén codex/dot_12-11_tru_kho_v22/public"
+   cp posgieo.html posgieo_thu.html quanlygieo.html quanlygieo_thu.html quanlygieo2.html DANH_SACH.txt unit_engine.v22.js gieo_engine2_pos_v5.js unit_engine2_store_v5.js /sdcard/MyCafeWeb/public/
+   cp js/posgieo/pos_thanh_toan.v2.js /sdcard/MyCafeWeb/public/js/posgieo/
+   cd /sdcard/MyCafeWeb && firebase deploy --only hosting
+   (KHÔNG xoá unit_engine.v21.js, pos_thanh_toan.v1.js, store v4 / cầu nối v4 trên máy — giữ để quay lui.)
+
+2) FUNCTIONS — chép đè rồi deploy:
+   cd "/sdcard/Download/Giải nén codex/dot_12-11_tru_kho_v22/functions/automation"
+   cp index.js engine2.js clock.js queue.js worker.js engine.js ~/MyCafeWeb/gieo-automation/
+   cp shared/unit_engine.v22.js shared/unit_engine2_store_v5.js ~/MyCafeWeb/gieo-automation/shared/
+   cd ~/MyCafeWeb && firebase deploy --only functions:gieo-automation
+   Không cần chỉ mục Firestore mới (truy vấn mới chỉ dùng các phép «==» / array-contains trên chỉ mục đơn trường tự có).
+   Không có collection mới. Trường mới: Sổ lệch absorbedBy / absorbedQty / absorbSkippedBy / ue; dòng sổ absorbedAllocations; tem RT lastConsumeOps / _anomCarry;
+   bill RT consumeJobs.main.
+
+3) SAU DEPLOY: tắt hẳn app POS ở quầy rồi mở lại (để nạp unit_engine.v22.js + pos_thanh_toan.v2.js). Mở lại quanlygieo.
+
+4) QUAY LUI (nếu cần): Hosting — chép lại posgieo.html / quanlygieo.html / quanlygieo2.html của gói trước (nạp unit_engine.v21.js +
+   pos_thanh_toan.v1.js) rồi deploy hosting. Functions — chép lại engine.js bản trước (nạp shared/unit_engine.v21.js) rồi deploy functions.
+   Dữ liệu v22 đã ghi (dấu trên tem, Sổ lệch absorbed, consumeJobs) không làm v21 chạy sai: v21 bỏ qua các trường này.
+
+NỘI DUNG
+- F1 Engine 2: báo hết còn dư / hụt cân mà Sổ lệch «bán khi chưa có tem mở» / «lỗi kết nối lúc trừ tem» giải thích → phần đó không quy cho
+  pha chế, không nâng mức kiểm soát.
+- F2 Kho v22: quét MỞ tem mới thì tem gánh luôn phần đã bán lúc chưa có tem nào mở (như gánh nợ FIFO) → báo hết lúc hộp thật cạn không còn
+  «hao hụt» giả; Sổ lệch dòng đó chuyển «đã gánh». Chỉ áp dụng dòng Sổ lệch phát sinh SAU khi deploy.
+- F3 Kho v22: trừ tem lúc bán bị rớt kết nối → tự thử lại (≤ 0,75 giây, chạy nền), không bao giờ trừ đôi; vẫn lỗi thì Sổ lệch ghi đúng
+  «Trừ tem lỗi kết nối» (trước: «chưa quét mở tem») + cảnh báo cho quản lý.
+- F4 POS: bill tắt app giữa lúc trừ kho → mở app / vào kết ca tự chạy nốt (không trừ đôi).
+- Đo tải Engine 2 (node tools/automation/engine2_do_tai.js): một quán / ngày 857 → 865 lượt đọc. Bán một bill: không thêm lượt đọc Firestore;
+  thêm 1 lần ghi RT nền (đánh dấu bill đã trừ kho xong).

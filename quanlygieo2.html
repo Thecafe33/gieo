@@ -2928,11 +2928,11 @@ html.tab-ui .topbar.has-notifications .topbar-actions{flex:0 0 auto;max-width:ca
 <!-- [TỰ PHỤC HỒI] Nạp file lần đầu thất bại (404 bị trình duyệt NHỚ vì header immutable khi HTML lên site trước file JS, hoặc mạng chập)
      → nạp lại ĐÚNG MỘT LẦN bằng địa chỉ khác (?r=1 — khác khoá cache) trước khi script chính chạy. Không đổi tên file / không cần deploy lại. (Viết '<scr'+'ipt' để tools/predeploy_check không đếm nhầm thành thẻ thứ hai; có id để các công cụ quét — chỉ lấy khối script TRẦN (không thuộc tính) đầu tiên làm script chính — không lấy nhầm.) -->
 <script id="gdRetry">if(!window.GieoData){document.write('<scr'+'ipt src="data_access.v9.js?r=1"><\/scr'+'ipt>');}</script>
-<script src="unit_engine.v21.js"></script>
+<script src="unit_engine.v22.js"></script>
 <script src="gieo_automation.v3.js"></script>
 <script src="unit_engine2_v1.js"></script>
 <script src="unit_engine2_store_v1.js"></script>
-<script id="ueRetry">if(!window.UnitEngine){document.write('<scr'+'ipt src="unit_engine.v21.js?r=1"><\/scr'+'ipt>');}</script>
+<script id="ueRetry">if(!window.UnitEngine){document.write('<scr'+'ipt src="unit_engine.v22.js?r=1"><\/scr'+'ipt>');}</script>
 <!-- [Engine 2 · B2] Bản kiểm toán kho — chỉ dùng khi bấm ở Trích xuất dữ liệu; thiếu file thì nút báo, app vẫn chạy. -->
 <script src="unit_engine2_export_v2.js"></script>
 <script>
@@ -11079,6 +11079,7 @@ function thToggleRow(itemId){
 const SOLECH_KIND = {
   atomic_unscanned:     ['Món cả cái bị trừ mà không quét mã', 'Công thức ly/topping dùng thẳng KIT, hoặc trừ ngoài cổng quét khi nấu'],
   no_open_tem:          ['Trừ khi chưa có tem đang mở', 'Nhân viên chưa quét mở tem mới'],
+  rt_error:             ['Trừ tem lỗi kết nối', 'Tem có thể đang mở nhưng lúc bán mất kết nối realtime (kho v22 đã thử lại) — không phải chưa quét tem'],
   waste_no_tem:         ['Hao hụt không gắn tem', 'Đổ/huỷ lúc không có tem đang mở'],
   reversal_outside_tem: ['Hoàn kho ngoài tem', 'Xoá/sửa bill mà không trả được vào tem'],
   manual_adjust:        ['Chỉnh tay', 'Quản lý chỉnh ngoài tem'],
@@ -11140,7 +11141,7 @@ async function renderKhoSoLech(){
       <div class="card">
         <div style="font-weight:700;margin-bottom:8px">Chi tiết (mới nhất trước)</div>
         ${rows.slice(0,300).map(r=>`<div class="kx-line" style="margin-bottom:6px">
-          <div class="kx-l"><b>${escapeHtmlAttr(r.itemName||'')}</b> <span class="tier tier-amber">${escapeHtmlAttr(kindLabel(r.kind))}</span>${r.status==='explained_substitution'?' <span class="tier tier-blue">Đã xác nhận bù</span>':''}
+          <div class="kx-l"><b>${escapeHtmlAttr(r.itemName||'')}</b> <span class="tier tier-amber">${escapeHtmlAttr(kindLabel(r.kind))}</span>${r.status==='explained_substitution'?' <span class="tier tier-blue">Đã xác nhận bù</span>':''}${r.absorbedBy?' <span class="tier tier-blue">Tem mở sau đã gánh '+fmtNum(Number(r.absorbedQty)||0,2)+'</span>':''}
             <div class="kx-sub">${escapeHtmlAttr(r.note||'')}</div>
             <div class="kx-sub">${escapeHtmlAttr(r.businessDate||'')} · ${escapeHtmlAttr(String(r.createdAt||'').slice(11,16))}${r.staff?' · '+escapeHtmlAttr(r.staff):''}${r.referenceId?' · '+escapeHtmlAttr(r.referenceId):''}</div>
           </div>

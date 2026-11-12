@@ -38,7 +38,10 @@
  *   B3. e2Plan: lượt học công bố việc cân ngẫu nhiên / độc lập đang chờ lên tài liệu điều khiển; việc xong / huỷ thì gỡ ngay trong
  *       transaction vốn đã ghi tài liệu đó.
  *   G1. nextDue() + opts.onDue: báo cho nhịp đồng hồ biết quán CÓ việc hẹn (việc lỗi chờ thử lại) — không có thì nhịp không vào quán.
- *   B5. withdraw: lượt cân được nhận MUỘN sau khi POS đã hết thời gian chờ và tự ghi kho → rút lại (rejected) + đóng việc kèm lý do. */
+ *   B5. withdraw: lượt cân được nhận MUỘN sau khi POS đã hết thời gian chờ và tự ghi kho → rút lại (rejected) + đóng việc kèm lý do.
+ * v5 + F1 (12/11/2026, docs/KE_HOACH_FIX_TRU_KHO_HAO_HUT_12-11.md — chưa deploy nên sửa tại chỗ): báo hết còn dư / hụt cân mà Sổ lệch đã
+ *   giải thích (no_open_tem / rt_error cùng món, còn mở, trong khoảng) → phần đó không phân bổ, không nâng mức, quan sát không học
+ *   (anomalyExplain / explainOutcome). Không có Sổ lệch → kết quả và dấu vân tay y hệt trước. Thêm 1 truy vấn có giới hạn / lần xét. */
 (function(root){
 'use strict';
 const E=typeof module==='object'&&module.exports?require('./unit_engine2_v1.js'):root.UnitEngine2;
@@ -74,6 +77,41 @@ function create(opts){
   const old=c.lastShiftWeigh,legacy=old&&old.op!==point?.operationId&&E.finite(old.weighed)&&old.op&&Number.isFinite(E.ms(old.at))?{id:'legacy_'+old.op,status:'valid',containerId:c.id,countedAt:old.at,quality:'legacy_recorded',sourcePath:coll('stock_containers').doc(c.id).path,sourceOp:old.op}:null;
   return [point,legacy].filter(p=>p&&E.ms(p.countedAt)>E.ms(c.openedAt)&&E.ms(p.countedAt)<E.ms(to)).sort((a,b)=>E.ms(b.countedAt)-E.ms(a.countedAt))[0]||null;
  }
+ // [F1 12/11 — docs/KE_HOACH_FIX_TRU_KHO_HAO_HUT_12-11.md] Hao hụt (báo hết còn dư / hụt cân) mà Sổ lệch đã giải thích — bán khi chưa
+ // có tem mở (no_open_tem) hoặc lỗi kết nối lúc trừ tem (rt_error, kho v22): phần đó KHÔNG phân bổ cho pha chế, không làm căn cứ nâng mức,
+ // quan sát học của khoảng đó không dùng. CHỈ ĐỌC Sổ lệch (không đóng / sửa dòng nào — việc của quản lý / của kho khi mở tem).
+ // Một truy vấn có giới hạn (itemId + status, chỉ mục đơn trường). Cửa sổ: từ mốc cân hợp lệ (nếu có) hoặc từ lúc mở tem − 3 ngày (bán
+ // trước khi quét mở) tới lúc báo hết / cân. Một dòng Sổ lệch chỉ giải thích MỘT hồ sơ (hồ sơ khác đã dùng thì bỏ qua).
+ const ANOMALY_KINDS=['no_open_tem','rt_error'],ANOMALY_PREOPEN_MS=3*E.DAY,anomalyLeft=a=>E.round(Math.abs(Number(a.qty)||0)-(Number(a.absorbedQty)||0));
+ async function anomalyExplain(itemId,container,range,quantity,caseId){
+  if(!(Number(quantity)>0))return null;
+  const lo=range.checkpointId?E.ms(range.from):E.ms(container.openedAt)-ANOMALY_PREOPEN_MS,hi=E.ms(range.to);
+  const sn=await coll('stock_anomalies').where('itemId','==',itemId).where('status','==','open').limit(50).get();
+  const rows=sn.docs.map(data).filter(a=>ANOMALY_KINDS.includes(a.kind)&&Number(a.qty)<0&&anomalyLeft(a)>0.005&&E.ms(a.createdAt)>=lo&&E.ms(a.createdAt)<=hi)
+   .sort((a,b)=>E.ms(a.createdAt)-E.ms(b.createdAt)||String(a.id).localeCompare(String(b.id)));
+  const use=[];let left=Number(quantity),total=0;
+  for(const a of rows){
+   if(left<=0.005)break;
+   const other=await sub('cases').where('explainedByAnomaly.anomalyIds','array-contains',a.id).limit(5).get();
+   if(other.docs.some(d=>d.id!==caseId&&d.data().status!=='voided'))continue;
+   const take=Math.min(left,anomalyLeft(a));use.push(a);total+=take;left-=take;
+  }
+  return use.length?{qty:E.round(total),anomalyIds:use.map(a=>a.id),rows:use}:null;
+ }
+ // Áp phần đã giải thích lên quyết định: tổng lượng / tiền giữ nguyên (khớp dòng hao hụt gốc), phần giải thích nằm ở pending.
+ function explainOutcome(result,ex){
+  if(!ex||result.status==='voided'||['manual_source','spec_mismatch','waiting_sibling'].includes(result.basis))return result;
+  const q=Number(result.quantity)||0,exQ=E.round(Math.min(q,ex.qty));if(!(exQ>0))return result;
+  const rest=E.round(q-exQ),amount=result.amount===null||result.amount===undefined?null:Number(result.amount),exV=amount===null?null:rest>0.005?E.round(amount*exQ/q):amount;
+  const tag={qty:exQ,anomalyIds:ex.anomalyIds,kinds:[...new Set(ex.rows.map(a=>a.kind))].sort()};
+  if(rest<=0.005)return {...result,basis:'anomaly_explained',allocations:[],pending:{qty:q,value:amount},explainedByAnomaly:tag,control:null,actions:[],
+   explanation:'Toàn bộ '+exQ+' '+(result.unit||'')+' đã có Sổ lệch giải thích (bán khi chưa có tem mở / lỗi kết nối lúc trừ tem) — cùng một lượng hàng, không phải hao hụt của pha chế. Không phân bổ, không nâng mức kiểm soát.'};
+  const people=(result.allocations||[]).map(a=>a.employeeId),byId=new Map((result.allocations||[]).map(a=>[a.employeeId,a]));
+  const qty=E.split(rest,people),money=amount===null?null:E.split(E.round(amount-exV),people);
+  return {...result,allocations:qty.map((p,i)=>({...byId.get(p.employeeId),qty:p.value,value:money?money[i].value:null})),pending:{qty:exQ,value:exV},explainedByAnomaly:tag,
+   explanation:result.explanation+' Trừ trước '+exQ+' '+(result.unit||'')+' đã có Sổ lệch giải thích (không phân bổ).'};
+ }
+ const auditOf=d=>E.audit(d).filter(f=>!(f==='NO_BARISTA_ALLOCATION'&&d.basis==='anomaly_explained'));
  // Việc của chính lượt cân: in_progress → done (VALID_RESULT). Việc khác cùng món được lượt cân này phủ → superseded (NEW_REVISION):
  // đặc tả 3.4 chỉ cho VALID_RESULT dẫn tới done.
  function finalOwn(status){return status==='in_progress'?{status:E.transition('task',status,'VALID_RESULT')}:['done','superseded','cancelled'].includes(status)?{}:{status:E.transition('task',status,'NEW_REVISION')};}
@@ -152,17 +190,22 @@ function create(opts){
   let receipt,rejected=false;if(lotNeeded){const [rs,es]=await Promise.all([coll('receiving_records').doc(c.receiveRefId).get(),sub('evidence').doc(E.key('spec_confirm',c.receiveRefId,c.itemId)).get()]);receipt=rs.exists;
    const r=es.exists?es.data().result||{}:null;rejected=!!(r&&Number(r.recordedQty)>0&&Math.abs(Number(r.labelQty)-Number(r.recordedQty))/Number(r.recordedQty)<=0.02);}
   const specCheck=needLot?E.specCheck(c,ownShort,siblings,now(),lotNeeded?{receipt,rejected}:{}):null;
-  const result=E.specOutcome(E.decision(input),specCheck),groupKey=(result.allocations||[]).map(a=>a.employeeId).sort().join('+');
-  if(['assigned_by_manager','manual'].includes(source.responsibility?.status)&&result.status!=='voided')Object.assign(result,{decisionMode:'manual',basis:'manual_source',manualSource:source.responsibility,allocations:[],pending:{qty:result.quantity,value:result.amount},explanation:'Giữ nguyên quyết định tay trong chứng từ nguồn. Engine 2 không phân bổ lại hoặc tạo khoản thu thứ hai.'});
-  const faults=E.audit(result);if(faults.length)throw error('Tự kiểm toán: '+faults.join(', '));
-  const fingerprint=E.stable(specCheck&&specCheck.action!=='decide'||specCheck?.reason==='wait_timeout'?{input,spec:specCheck.action+':'+specCheck.reason}:input),controlRef=sub('controls').doc(source.itemId),taskRef=sub('tasks').doc(E.key('baseline',id));
+  // [F1] Phần hao hụt đã có Sổ lệch giải thích — đọc trước khi chốt (chỉ khi nguồn còn hiệu lực).
+  const ex=source.type==='WASTE'&&!source.voided&&Number(source.qty)<0?await anomalyExplain(source.itemId,c,range,-Number(source.qty),caseRef.id):null;
+  const result=explainOutcome(E.specOutcome(E.decision(input),specCheck),ex),groupKey=(result.allocations||[]).map(a=>a.employeeId).sort().join('+');
+  if(['assigned_by_manager','manual'].includes(source.responsibility?.status)&&result.status!=='voided'){Object.assign(result,{decisionMode:'manual',basis:'manual_source',manualSource:source.responsibility,allocations:[],pending:{qty:result.quantity,value:result.amount},explanation:'Giữ nguyên quyết định tay trong chứng từ nguồn. Engine 2 không phân bổ lại hoặc tạo khoản thu thứ hai.'});delete result.explainedByAnomaly;}
+  const faults=auditOf(result);if(faults.length)throw error('Tự kiểm toán: '+faults.join(', '));
+  // Không có Sổ lệch giải thích → dấu vân tay y hệt trước (hồ sơ cũ không bị tính lại).
+  const fpInput=result.explainedByAnomaly?{...input,anomaly:{qty:result.explainedByAnomaly.qty,ids:result.explainedByAnomaly.anomalyIds}}:input,anomalyRefs=result.explainedByAnomaly?ex.rows.map(a=>coll('stock_anomalies').doc(a.id)):[];
+  const fingerprint=E.stable(specCheck&&specCheck.action!=='decide'||specCheck?.reason==='wait_timeout'?{input:fpInput,spec:specCheck.action+':'+specCheck.reason}:fpInput),controlRef=sub('controls').doc(source.itemId),taskRef=sub('tasks').doc(E.key('baseline',id));
   return fs.runTransaction(async t=>{
    await fence(t,guard);
-   const refs=[base,sourceRef,containerRef,itemRef,cpRef,caseRef,controlRef,taskRef,...shifts.docs.map(s=>s.ref),...(valuation.priceId?[coll('price_history').doc(valuation.priceId)]:[])];
+   const refs=[base,sourceRef,containerRef,itemRef,cpRef,caseRef,controlRef,taskRef,...shifts.docs.map(s=>s.ref),...anomalyRefs,...(valuation.priceId?[coll('price_history').doc(valuation.priceId)]:[])];
    const snaps=await Promise.all(refs.map(r=>t.get(r)));const [cs,ss,cc,ii,pp,oldSn,ctlSn,taskSn]=snaps;
    const active=cs.exists?cs.data():{};if(!active.enabled)return false;
    if(E.stable(data(ss))!==E.stable(source)||E.stable(data(cc))!==E.stable(c)||E.stable(data(ii))!==E.stable(item)||E.stable(pp.exists?pp.data():null)!==E.stable(persistedPoint)||E.stable(snaps.slice(8,8+shiftRows.length).map(data))!==E.stable(shiftRows))throw error('Nguồn/ca vừa đổi; tính lại từ dữ liệu mới');
    if(E.stable([active.enabled,active.mode,active.fromDate,active.settingsRevision])!==E.stable([cfg.enabled,cfg.mode,cfg.fromDate,cfg.settingsRevision]))throw error('Thiết lập vừa đổi — tính lại theo phiên bản mới');
+   if(anomalyRefs.length&&snaps.slice(8+shiftRows.length,8+shiftRows.length+anomalyRefs.length).some((a,i)=>!a.exists||a.data().status!=='open'||anomalyLeft(a.data())!==anomalyLeft(ex.rows[i])))throw error('Sổ lệch vừa đổi; tính lại');
    if(valuation.priceId){const p=snaps.at(-1);if(!p.exists||Number(p.data().price)!==valuation.price||p.data().effectiveFrom!==valuation.effectiveFrom)throw error('Giá vốn vừa đổi — tính lại');}
    const old=oldSn.exists?oldSn.data():null;if(old?.decisionMode==='manual'&&result.status!=='voided')return false;
    // Trạng thái hồ sơ đi qua bảng DAC_TA 3.2; hồ sơ đã gộp (superseded) / đang xem xét (review) không bị ghi đè.
@@ -172,7 +215,7 @@ function create(opts){
    const revision=(old?.revision||0)+1,at=iso(),decisionId=caseRef.id+'_'+revision;
    const d={...result,status:flow.status,statusEvents:flow.events,originKind:'finish',originId:id,containerId:c.id,itemName:c.itemName||item.name||source.itemId,storeId:store,itemId:source.itemId,id:caseRef.id,revision,decisionId,mode,fingerprint,updatedAt:at,createdAt:old?.createdAt||at};
    t.set(caseRef,d);t.set(sub('decisions').doc(decisionId),{...d,previousDecisionId:old?.decisionId||null});
-   if(d.mode==='active'&&d.status!=='voided'&&!['spec_mismatch','waiting_sibling'].includes(d.basis)){
+   if(d.mode==='active'&&d.status!=='voided'&&!['spec_mismatch','waiting_sibling','anomaly_explained'].includes(d.basis)){
     const oldCtl=ctlSn.exists?ctlSn.data():{level:0,manualFloor:0};
     const control=E.control(oldCtl,'PHYSICAL_LOSS');
     t.set(controlRef,{...control,storeId:store,itemId:source.itemId,itemName:d.itemName,unit:d.unit,revision:(oldCtl.revision||0)+1,requirements:d.control.requirements,updatedAt:at,reasonCaseIds:[...new Set([...(oldCtl.reasonCaseIds||[]),caseRef.id])].slice(-20)});
@@ -186,7 +229,7 @@ function create(opts){
    t.set(sub('audits').doc(decisionId),{decisionId,storeId:store,at,issues:faults,quantity:d.quantity||0,sourceId:id,policyVersion:E.POLICY});
    // Quan sát báo hết (cả đối chiếu thử — dữ liệu học không đổi kho / trách nhiệm). Nguồn huỷ → quan sát không dùng để học.
    const ob=observation(c,startPoint(c,cp),{kind:'finish',at:c.finishedAt,book:Number(c.wasteBase)||0,measured:0,weighed:false},{sampling:'finish',groupKey,vesselIds:[],controlled:!!(ctlSn.exists&&ctlSn.data().level>=2),ctx:{fifoDebt:false,densityProven:Number(item.densityGPerMl)>0},decisionId,mode});
-   if(d.status==='voided')Object.assign(ob,{verified:false,reason:'Nguồn hao hụt đã huỷ'});t.set(sub('obs').doc(ob.id),ob);
+   if(d.status==='voided')Object.assign(ob,{verified:false,reason:'Nguồn hao hụt đã huỷ'});else if(d.explainedByAnomaly)Object.assign(ob,{verified:false,reason:'Có Sổ lệch chưa đối trừ'});t.set(sub('obs').doc(ob.id),ob);
    // Nghi sai quy cách → việc đối chiếu nhãn bao với phiếu nhận (không cân) cho pha chế đang ca.
    if(d.basis==='spec_mismatch'&&d.mode==='active')t.set(sub('tasks').doc(E.key('spec_confirm',c.receiveRefId,c.itemId)),{id:E.key('spec_confirm',c.receiveRefId,c.itemId),storeId:store,itemId:c.itemId,itemName:d.itemName,kind:'spec_confirm',status:'queued',pending:true,assignment:'current_barista_group',receiveRefId:c.receiveRefId,recordedQty:Number(c.baseQty),resolves:'spec',caseId:caseRef.id,reason:'Đối chiếu quy cách in trên bao với phiếu nhận — nghi nhập sai quy cách',createdAt:at,updatedAt:at,revision:1},{merge:true});
    return d;
@@ -801,9 +844,11 @@ function create(opts){
    const range=E.interval(ct,u.checkpointSnapshot,u.countedAt),sh=await shiftsIn(range);
    if(sh.docs.length>500)throw error('Khoảng pha chế vượt giới hạn một lượt');
    proofs.push({ref:ctSn.ref,data:ct},...sh.docs.map(s=>({ref:s.ref,data:data(s)})));
-   const d=E.measuredDecision({store,sourceId:tx.id,source:tx,container:ct,shifts:sh.docs.map(data),checkpoint:u.checkpointSnapshot,countedAt:u.countedAt,valuation:await prices(m.itemId,day,tx,item)});
-   if(['assigned_by_manager','manual'].includes(tx.responsibility?.status))Object.assign(d,{decisionMode:'manual',basis:'manual_source',manualSource:tx.responsibility,allocations:[],pending:{qty:d.quantity,value:d.amount},explanation:'Giữ quyết định tay trên dòng hao hụt gốc; không tự phân bổ lại.'});
-   const faults=E.audit(d);if(faults.length)throw error(faults.join(', '));decisions.push(d);
+   const ex=await anomalyExplain(m.itemId,ct,range,-Number(tx.qty),E.key('weigh',id,u.id));   // [F1] hụt cân đã có Sổ lệch giải thích
+   let d=explainOutcome(E.measuredDecision({store,sourceId:tx.id,source:tx,container:ct,shifts:sh.docs.map(data),checkpoint:u.checkpointSnapshot,countedAt:u.countedAt,valuation:await prices(m.itemId,day,tx,item)}),ex);
+   if(d.explainedByAnomaly)proofs.push(...ex.rows.map(a=>({ref:coll('stock_anomalies').doc(a.id),data:a})));
+   if(['assigned_by_manager','manual'].includes(tx.responsibility?.status)){Object.assign(d,{decisionMode:'manual',basis:'manual_source',manualSource:tx.responsibility,allocations:[],pending:{qty:d.quantity,value:d.amount},explanation:'Giữ quyết định tay trên dòng hao hụt gốc; không tự phân bổ lại.'});delete d.explainedByAnomaly;}
+   const faults=auditOf(d);if(faults.length)throw error(faults.join(', '));decisions.push(d);
   }
   const waiting=await sub('tasks').where('itemId','==',m.itemId).where('pending','==',true).limit(100).get();
   return fs.runTransaction(async t=>{
@@ -833,7 +878,7 @@ function create(opts){
     const ob=observation({id:u.id,itemId:m.itemId,unit:item.unit,openedAt:u.openedAt,baseQty:u.capacity},startPoint({openedAt:u.openedAt,baseQty:u.capacity},u.checkpointSnapshot),{kind:'weigh',at:u.countedAt,book:Number(u.baseline),measured:Number(u.weighed),weighed:true},
      {sampling:tk.sampling||'control',blind:!!tk.blind,groupKey:(dc?.allocations||[]).map(a=>a.employeeId).sort().join('+'),vesselIds:(u.weighings||[]).map(w=>w.vesselId),controlled:(tk.sampling||'control')==='control',measuredBy:m.staff.id,measurementId:id,
       minutes:line.startedAt&&line.finishedAt?Math.max(0,(E.ms(line.finishedAt)-E.ms(line.startedAt))/60000):null,ctx:{fifoDebt:Number(u.baseline)<0,densityProven:!['ml','l'].includes(String(item.unit).toLowerCase())||Number(item.densityGPerMl)>0}});
-    t.set(sub('obs').doc(ob.id),ob);if(!previousPoints[i].exists||E.ms(previousPoints[i].data().countedAt)<=E.ms(cp.countedAt))t.set(sub('unit_checkpoints').doc(u.id),cp);
+    if(dc?.explainedByAnomaly)Object.assign(ob,{verified:false,reason:'Có Sổ lệch chưa đối trừ'});t.set(sub('obs').doc(ob.id),ob);if(!previousPoints[i].exists||E.ms(previousPoints[i].data().countedAt)<=E.ms(cp.countedAt))t.set(sub('unit_checkpoints').doc(u.id),cp);
    }
    if(!alreadyComplete){t.delete(sub('measurement_locks').doc(m.itemId));
     if(cs.exists){const plan=planWithout(cs.data(),closedTasks);t.update(base,{lastMeasurementAt:at,revision:(cs.data().revision||0)+1,e2Daily:bumpDaily(cs.data().e2Daily,vnDay(now()),'e2'),...(plan?{e2Plan:plan}:{})});}   // [v4-4] đếm «Engine 2 nhận»; [v5-B3] gỡ việc xong khỏi danh sách

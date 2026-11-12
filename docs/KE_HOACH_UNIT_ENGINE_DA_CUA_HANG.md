@@ -192,6 +192,7 @@ M1 Lớp truy cập dữ liệu ngoài engine ◄── (song song E4–E6)
 | B13 | **Ghi tuyệt đối có chống ghi đè** (dấu mốc node hoặc giá trị kỳ vọng) | `shiftWeighApplyLinePOS`, `prepReconSetUnit`, `ctnAdjustCore` |
 | B14 | **Mã** 8 ký tự ngẫu nhiên, kiểm trùng trong collection; mã trùng cũ bị chặn | `capMaKhoDuyNhat`, `findContainerByCode` |
 | B15 | **Tem cái rời** không mở qua quét; báo hết đi thẳng từ sealed | `scanToOpenContainer`, `writeAtomicContainerFinish` |
+| B16 | **Mở tem gánh khoản bán ngoài tem còn mở của món** (v22, 12/11): dòng Sổ lệch `no_open_tem` (ghi từ v22, chưa lần mở tem nào xét — `absorbSkippedBy`, ≤ 3 ngày) trừ vào tem mới khi không còn tem nào khác đang mở, ≤ dung tích còn lại sau nợ; hai pha `_anomCarry` như `_fifoCarry`; một dòng chỉ được gánh một lần; xoá bill → hoàn về tem đã gánh | `unitEngineOnOpen`, `_ueSettleAnomCarry`, `prepareOrderReversalNetPOS` |
 
 ### 2.2 Lõi trong POS (chuyển nguyên vào engine)
 

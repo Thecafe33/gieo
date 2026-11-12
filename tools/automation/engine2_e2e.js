@@ -8,7 +8,7 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://loc
  for(const width of [1366,390]){
   const page=await b.newPage({viewport:{width,height:900}}),errors=[];page.on('pageerror',e=>errors.push(e.message));await page.route('**/*',r=>r.request().url().startsWith(base)?r.continue():r.abort());await page.goto(base+'/__engine2');
   await page.addScriptTag({content:'(function(){const process={env:{}};'+fake+'})();'});
-  for(const name of ['unit_engine.v21.js','unit_engine2_v1.js','unit_engine2_store_v1.js'])await page.addScriptTag({url:base+'/'+name});
+  for(const name of ['unit_engine.v22.js','unit_engine2_v1.js','unit_engine2_store_v1.js'])await page.addScriptTag({url:base+'/'+name});
   await page.addScriptTag({content:`
    const day=new Date(Date.now()+7*3600000).toISOString().slice(0,10),at=new Date().toISOString(),start=new Date(Date.now()-3600000).toISOString(),rt='active_units_gieogieo/j',base='duty_digests_gieogieo/_engine2';
    window.POS_STORE={storeId:'gg01'};window.__taskReads=0;window.__offline=false;window.__continued=0;

@@ -29,7 +29,7 @@ function fixture(extra={},cfg={},t=T0){
   ...Object.fromEntries([...Array(18)].map((_,i)=>ev('sg',i,i%4===0?300:150))),...Object.fromEntries([...Array(10)].map((_,i)=>ev('ts',i,150))),
   ...extra};
  const fake=makeFake({fs:seed}),ctx={console,crypto:require('node:crypto').webcrypto,setTimeout,clearTimeout};
- vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../unit_engine.v21.js'),'utf8'),ctx);
+ vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../unit_engine.v22.js'),'utf8'),ctx);
  const UE=ctx.UnitEngine;let now=t;UE.init({fstore:fake.fstore,db:fake.db,FieldValue:fake.FieldValue,now:()=>now,storeId:'gg01',app:'quanly'});
  const s=create({storeId:'gg01',fstore:fake.fstore,now:()=>now,inventory:UE});
  return {...fake,UE,s,at:ms=>{now=ms;}};
