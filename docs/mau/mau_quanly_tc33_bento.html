@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MẪU — pos.html › Quản lý (bento, PC / Mi Pad 7 ngang)</title>
+<!-- MẪU DUYỆT GIAO DIỆN — không phải app thật, dữ liệu giả. Giữ nguyên id / tên hàm của pos.html để khi duyệt xong chép thẳng. -->
+<style>
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{font-family:'Inter',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#f3f4f6;color:#16241d;display:flex;flex-direction:column;-webkit-font-smoothing:antialiased}
+/* thanh trên giả (trong app thật là #header-bar-pc, không đổi) */
+.fake-head{height:80px;flex-shrink:0;background:#fff;display:flex;align-items:center;gap:28px;padding:0 32px;border-bottom:1px solid #eef0f1}
+.fake-head h2{font-size:32px;color:#006241;margin:0;letter-spacing:-.04em;font-weight:800}
+.fake-head span{background:#f3f4f6;color:#9ca3af;padding:11px 20px;border-radius:16px;font-size:11px;font-weight:900;letter-spacing:.1em;text-transform:uppercase}
+.fake-head span.on{background:#006241;color:#fff}
+
+/* ═════════ [POS-MANAGER-BENTO] ═════════ */
+#view-discount{
+  --g:#006241;--g-soft:#e7f3ed;--g-line:#b9d8c8;--ink:#16241d;--ink2:#5b6b63;--ink3:#8b9892;
+  --bg:#eef1ef;--tile:#fff;--line:#e3e8e5;--field:#f5f7f6;--red:#d92d20;--r:22px;--gap:12px;
+  flex:1;min-height:0;display:flex;flex-direction:column;gap:var(--gap);padding:14px;background:var(--bg);color:var(--ink);overflow:hidden}
+#view-discount button{font-family:inherit;cursor:pointer;touch-action:manipulation}
+#view-discount :is(button,input,select,textarea):focus-visible{outline:3px solid #00624155;outline-offset:2px}
+
+/* thanh mục */
+.mgr-top{display:flex;align-items:center;gap:14px;flex-shrink:0}
+.mgr-top>b{font-size:20px;font-weight:800;letter-spacing:-.02em;padding-left:6px}
+.mgr-seg{display:flex;gap:4px;padding:4px;background:#fff;border:1px solid var(--line);border-radius:18px;overflow-x:auto;scrollbar-width:none}
+.mgr-seg button{display:flex;align-items:center;gap:8px;height:44px;padding:0 16px;border:0;border-radius:14px;background:transparent;color:var(--ink2);font-size:15px;font-weight:650;white-space:nowrap;flex-shrink:0}
+.mgr-seg button svg{width:18px;height:18px;flex-shrink:0}
+.mgr-seg button[aria-selected=true]{background:var(--g);color:#fff;box-shadow:0 4px 12px #00624133}
+.mgr-seg button.season[aria-selected=true]{background:#991b1b}
+
+/* khung làm việc: cột danh sách + vùng bento */
+.mgr-workspace{flex:1;min-height:0;display:grid;grid-template-columns:clamp(300px,27%,380px) minmax(0,1fr);gap:var(--gap)}
+.mgr-workspace.no-list{grid-template-columns:minmax(0,1fr)}
+.mgr-workspace.no-list #mgr-col-b-wrap{display:none}
+#mgr-col-b-wrap,#mgr-col-c{min-height:0;min-width:0;display:flex;flex-direction:column}
+.mgr-pane{flex:1;min-height:0;display:flex;flex-direction:column;gap:var(--gap)}
+.mgr-pane:not(.on){display:none!important}
+
+/* ô bento */
+.mgr-tile{background:var(--tile);border:1px solid var(--line);border-radius:var(--r);padding:16px;min-width:0;min-height:0;display:flex;flex-direction:column;gap:12px}
+.mgr-tile>h3{margin:0;font-size:13px;font-weight:750;color:var(--ink3);letter-spacing:.02em;display:flex;align-items:center;gap:8px;flex-shrink:0}
+.mgr-tile>h3 em{font-style:normal;font-weight:600;color:var(--ink3);margin-left:auto;font-size:12.5px}
+.mgr-tile.scroll{overflow-y:auto;overscroll-behavior:contain}
+.mgr-bento{flex:1;min-height:0;display:grid;gap:var(--gap)}
+
+/* danh sách */
+.mgr-list{flex:1;padding:14px 10px 10px}
+.mgr-list-head{display:flex;align-items:center;gap:8px;padding:0 6px}
+.mgr-list-head b{font-size:17px;font-weight:800}
+.mgr-list-head b span{font-size:12.5px;font-weight:700;color:var(--g);background:var(--g-soft);padding:3px 9px;border-radius:99px;margin-left:6px}
+.mgr-search{display:flex;gap:8px;padding:0 6px}
+.mgr-rows{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;display:flex;flex-direction:column;gap:6px;padding:2px 6px 6px}
+.mgr-row{display:flex;align-items:center;gap:11px;padding:10px 12px;border:1px solid var(--line);border-radius:16px;background:#fff;min-height:60px;cursor:pointer;flex-shrink:0}
+.mgr-row[aria-pressed=true]{background:var(--g-soft);border-color:var(--g);box-shadow:inset 4px 0 var(--g)}
+.mgr-row .dot{width:6px;align-self:stretch;border-radius:4px;flex-shrink:0}
+.mgr-row .info{flex:1;min-width:0}
+.mgr-row .info b{display:block;font-size:15px;font-weight:700;line-height:1.3;overflow-wrap:anywhere}
+.mgr-row .info small{display:block;font-size:12.5px;color:var(--ink2);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mgr-row .price{font-size:13px;font-weight:700;color:#294c3a;white-space:nowrap;text-align:right;line-height:1.5}
+.mgr-row.gift{flex-direction:column;align-items:stretch;gap:8px}
+.mgr-row.gift .hd{display:flex;gap:10px;align-items:center}
+.mgr-row.gift .ic{width:38px;height:38px;border-radius:12px;background:var(--field);display:grid;place-items:center;font-size:19px;flex-shrink:0}
+.mgr-chips{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.mgr-chip{font-size:12px;font-weight:700;padding:3px 9px;border-radius:99px;white-space:nowrap;background:var(--field);color:var(--ink2)}
+.mgr-chip.val{background:none;padding:0;font-size:15px;font-weight:800;color:var(--red)}
+.mgr-chip.on{background:#d1fae5;color:#047857}.mgr-chip.off{background:#fee2e2;color:#b91c1c}
+.mgr-chip.code{font-family:ui-monospace,monospace;background:var(--g-soft);color:var(--g)}
+.mgr-thumb{width:56px;height:36px;border-radius:9px;background:linear-gradient(135deg,#cfe3d8,#9cc4b0);flex-shrink:0}
+
+/* trường nhập — thoải mái cho ngón tay */
+.mgr-field{display:flex;flex-direction:column;gap:6px;min-width:0}
+.mgr-field>label{font-size:14px;font-weight:650;color:#33443b;line-height:1.3}
+.mgr-field>label span{font-weight:500;color:var(--ink3);font-size:12.5px}
+.mgr-field>p{margin:0;font-size:12.5px;color:var(--ink3);line-height:1.4}
+.mgr-input,#view-discount select,#view-discount textarea{width:100%;min-width:0;height:52px;padding:0 14px;border:1.5px solid var(--line);border-radius:15px;background:var(--field);font-family:inherit;font-size:17px;font-weight:600;line-height:1.3;color:var(--ink);outline:0;transition:border-color .15s,background .15s}
+#view-discount textarea{height:auto;padding:13px 16px;resize:none;line-height:1.45}
+.mgr-input::placeholder,#view-discount textarea::placeholder{color:#a9b4ae;font-weight:500}
+.mgr-input:focus,#view-discount select:focus,#view-discount textarea:focus{border-color:var(--g);background:#fff}
+.mgr-input.big{font-size:20px;font-weight:800;color:var(--g);letter-spacing:.03em}
+.mgr-input.sm{height:44px;font-size:15px;border-radius:13px}
+.mgr-2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+
+/* nút */
+.mgr-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:48px;padding:0 20px;border-radius:15px;border:1.5px solid var(--line);background:#fff;color:var(--ink);font-size:15px;font-weight:700;white-space:nowrap}
+.mgr-btn.pri{background:var(--g);border-color:var(--g);color:#fff;box-shadow:0 6px 16px #00624130}
+.mgr-btn.del{color:var(--red);border-color:#f6d2ce;background:#fff5f4}
+.mgr-btn.dark{background:#16241d;border-color:#16241d;color:#fff}
+.mgr-btn.sm{height:44px;padding:0 14px;font-size:14px;border-radius:13px}
+.mgr-btn.icon{width:44px;padding:0}
+.mgr-btn.full{width:100%}
+.mgr-btn[disabled]{opacity:.45}
+.mgr-btn[aria-pressed=true]{background:var(--g);border-color:var(--g);color:#fff}
+
+/* đầu vùng soạn: tên + thao tác luôn thấy */
+.mgr-edhead{display:flex;align-items:center;gap:10px;flex-shrink:0;background:#fff;border:1px solid var(--line);border-radius:var(--r);padding:10px 10px 10px 20px;min-height:68px}
+.mgr-edhead>b{flex:1;min-width:0;font-size:19px;font-weight:800;letter-spacing:-.01em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mgr-edhead>small{font-size:13px;color:var(--ink3);font-weight:600}
+
+/* nhóm chọn 1 */
+.mgr-pick{display:flex;flex-wrap:wrap;gap:6px}
+.mgr-pick button{height:44px;padding:0 14px;border-radius:13px;border:1.5px solid var(--line);background:#fff;color:var(--ink2);font-size:14.5px;font-weight:650}
+.mgr-pick button[aria-pressed=true]{background:var(--g);border-color:var(--g);color:#fff}
+.mgr-switch{width:56px;height:32px;border-radius:99px;border:0;background:#cfd6d2;position:relative;flex-shrink:0}
+.mgr-switch::after{content:'';position:absolute;top:3px;left:3px;width:26px;height:26px;border-radius:50%;background:#fff;box-shadow:0 1px 4px #0003;transition:transform .15s}
+.mgr-switch[aria-checked=true]{background:var(--g)}.mgr-switch[aria-checked=true]::after{transform:translateX(24px)}
+.mgr-line{display:flex;align-items:center;gap:12px;padding:10px 14px;border-radius:15px;background:var(--field)}
+.mgr-line div{flex:1}.mgr-line b{display:block;font-size:15px}.mgr-line small{font-size:12.5px;color:var(--ink3)}
+.mgr-step{display:flex;align-items:center;gap:8px}
+.mgr-step output{flex:1;height:48px;display:grid;place-items:center;background:var(--field);border-radius:14px;font-size:19px;font-weight:800}
+.mgr-step output small{font-size:12px;color:var(--ink3);font-weight:600;margin-left:4px}
+.mgr-step .mgr-btn{width:52px;padding:0;font-size:22px}
+.mgr-stage{flex:1;min-height:0;border-radius:16px;background:repeating-conic-gradient(#f1f4f2 0 25%,#fafbfa 0 50%) 0 0/20px 20px;display:grid;place-items:center;color:var(--ink3);font-size:14px;overflow:hidden}
+.mgr-drop{flex:1;min-height:84px;border:2px dashed #c9d3ce;border-radius:16px;display:grid;place-items:center;text-align:center;color:var(--ink2);font-size:14.5px;font-weight:600;background:var(--field)}
+.mgr-log{flex:1;min-height:0;background:#101d17;color:#8fe3b5;border-radius:14px;padding:12px;font:12.5px/1.7 ui-monospace,monospace;overflow-y:auto}
+.mgr-sw{display:flex;flex-wrap:wrap;gap:8px}
+.mgr-sw i{width:40px;height:40px;border-radius:13px;display:block}
+.mgr-sw i.on{outline:3px solid var(--ink);outline-offset:2px}
+.mgr-tagbox{display:flex;flex-wrap:wrap;gap:6px}
+.mgr-tag{display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 6px 0 12px;border-radius:99px;font-size:13.5px;font-weight:650;background:#dbeafe;color:#1d4ed8}
+.mgr-tag.x{background:#ede9fe;color:#5b21b6}.mgr-tag i{font-style:normal;width:22px;height:22px;border-radius:50%;background:#ffffffb0;display:grid;place-items:center;font-size:13px}
+
+/* ── bố cục bento từng mục ── */
+#mgr-c-menueditor .mgr-bento{grid-template-columns:repeat(6,minmax(0,1fr));grid-template-rows:auto auto minmax(0,1fr)}
+#mgr-c-gift .mgr-bento{grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,.95fr);grid-template-rows:auto minmax(0,1fr)}
+#mgr-c-screen .mgr-bento{grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);grid-template-rows:auto minmax(0,1fr)}
+#mgr-c-sticker .mgr-bento{grid-template-columns:minmax(0,1.15fr) minmax(0,1fr) minmax(0,1fr);grid-template-rows:auto auto minmax(0,1fr)}
+#mgr-c-label .mgr-bento{grid-template-columns:repeat(3,minmax(0,1fr));grid-template-rows:minmax(0,1fr) auto auto}
+.c2{grid-column:span 2}.c3{grid-column:span 3}.c4{grid-column:span 4}.c6{grid-column:span 6}.r2{grid-row:span 2}.r3{grid-row:span 3}
+
+@media (max-height:760px){
+  #view-discount{--gap:10px;padding:10px}
+  .mgr-tile{padding:13px;gap:10px}
+  .mgr-input,#view-discount select{height:48px}
+  .mgr-edhead{min-height:60px;padding:6px 8px 6px 18px}
+}
+/* điện thoại: 1 cột, cuộn dọc (giữ thứ tự: danh sách → ô soạn) */
+@media (max-width:768px){
+  #view-discount{overflow-y:auto}
+  .mgr-top>b{display:none}
+  .mgr-workspace{display:flex;flex-direction:column}
+  #mgr-col-b-wrap{max-height:320px}
+  .mgr-bento{display:flex!important;flex-direction:column}
+  .mgr-edhead{position:sticky;top:0;z-index:2}
+}
+.note{position:fixed;right:12px;bottom:8px;font-size:11px;color:#8b9892;background:#ffffffd0;padding:3px 8px;border-radius:8px;pointer-events:none}
+</style>
+</head>
+<body>
+<div class="fake-head"><h2>The cafe 33</h2><span>Doanh thu</span><span>Lịch sử</span><span class="on">Quản lý</span><span>Cafe in Bed</span></div>
+
+<div id="view-discount">
+  <div class="mgr-top">
+    <b>Quản lý</b>
+    <div class="mgr-seg" role="tablist" id="mgr-col-a">
+      <button id="mgr-tab-menueditor" role="tab" onclick="switchMgrTab('menueditor')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg>Menu</button>
+      <button id="mgr-tab-gift" role="tab" onclick="switchMgrTab('gift')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12v9H4v-9M2 7h20v5H2zM12 22V7M12 7S10 2 7.5 2a2.5 2.5 0 0 0 0 5zM12 7s2-5 4.5-5a2.5 2.5 0 0 1 0 5z"/></svg>Quà tặng</button>
+      <button id="mgr-tab-screen" role="tab" onclick="switchMgrTab('screen')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg>Màn hình</button>
+      <button id="mgr-tab-sticker" role="tab" onclick="switchMgrTab('sticker')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L2 12V2h10l8.6 8.6a2 2 0 0 1 0 2.8zM7 7h.01"/></svg>Tem</button>
+      <button id="mgr-tab-label" role="tab" onclick="switchMgrTab('label')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2M6 14h12v8H6z"/></svg>In ảnh</button>
+      <button id="mgr-tab-gaunoel" class="season" role="tab" onclick="switchMgrTab('gaunoel')">🧸 Gấu Noel</button>
+    </div>
+  </div>
+
+  <div class="mgr-workspace">
+    <!-- ══ CỘT DANH SÁCH ══ -->
+    <div id="mgr-col-b-wrap">
+      <div id="mgr-b-menueditor" class="mgr-pane mgr-tile mgr-list">
+        <div class="mgr-list-head"><b>Món <span id="menu-editor-count">42</span></b></div>
+        <div class="mgr-search">
+          <input class="mgr-input sm" id="m-menu-search" type="search" placeholder="Tìm món…">
+          <select id="m-menu-group" class="sm" style="height:44px;font-size:15px;border-radius:13px;width:132px;flex-shrink:0;padding:0 10px"><option>Tất cả nhóm</option><option>Cà phê</option><option>Trà</option></select>
+        </div>
+        <div class="mgr-rows" id="menu-editor-list">
+          <div class="mgr-row"><span class="dot" style="background:#7c4a21"></span><div class="info"><b>Bạc xỉu</b><small>Cà phê</small></div><div class="price">M 29k<br>L 35k</div></div>
+          <div class="mgr-row" aria-pressed="true"><span class="dot" style="background:#006241"></span><div class="info"><b>Cà phê sữa đá</b><small>Cà phê</small></div><div class="price">M 25k<br>L 30k</div></div>
+          <div class="mgr-row"><span class="dot" style="background:#3b2a1e"></span><div class="info"><b>Cà phê đen đá</b><small>Cà phê</small></div><div class="price">M 20k<br>L 25k</div></div>
+          <div class="mgr-row"><span class="dot" style="background:#d97706"></span><div class="info"><b>Cà phê muối kem béo</b><small>Cà phê</small></div><div class="price">M 32k<br>L 38k</div></div>
+          <div class="mgr-row"><span class="dot" style="background:#be185d"></span><div class="info"><b>Trà đào cam sả</b><small>Trà</small></div><div class="price">M 35k<br>L 42k</div></div>
+          <div class="mgr-row"><span class="dot" style="background:#65a30d"></span><div class="info"><b>Trà ô long sen vàng</b><small>Trà</small></div><div class="price">M 38k<br>L 45k</div></div>
+          <div class="mgr-row"><span class="dot" style="background:#0e7490"></span><div class="info"><b>Matcha latte</b><small>Đá xay / Latte</small></div><div class="price">M 39k<br>L 46k</div></div>
+          <div class="mgr-row"><span class="dot" style="background:#b91c1c"></span><div class="info"><b>Mì cay khô</b><small>Ăn vặt</small></div><div class="price">M 45k</div></div>
+        </div>
+      </div>
+
+      <div id="mgr-b-gift" class="mgr-pane mgr-tile mgr-list">
+        <div class="mgr-list-head"><b>Quà <span id="discount-count">6 quà</span></b></div>
+        <div class="mgr-search"><input class="mgr-input sm" id="m-gift-search" type="search" placeholder="Tìm tên hoặc mã quà…"></div>
+        <div class="mgr-rows" id="discount-list">
+          <div class="mgr-row gift" aria-pressed="true"><div class="hd"><div class="ic">🎁</div><div class="info"><b>Giảm 5k mì cay khô</b></div></div><div class="mgr-chips"><span class="mgr-chip val">−5.000đ</span><span class="mgr-chip">Theo món</span><span class="mgr-chip">🔵 Cafe33</span><span class="mgr-chip on">BẬT</span><span class="mgr-chip code">C33-GIAM5K</span></div></div>
+          <div class="mgr-row gift"><div class="hd"><div class="ic">☕</div><div class="info"><b>Miễn phí 1 ly bất kỳ dưới 35k</b></div></div><div class="mgr-chips"><span class="mgr-chip val">★ 500 điểm</span><span class="mgr-chip">Miễn phí 1 ly</span><span class="mgr-chip">🟢 Cả 2</span><span class="mgr-chip on">BẬT</span></div></div>
+          <div class="mgr-row gift"><div class="hd"><div class="ic">⬆️</div><div class="info"><b>Up size M→L miễn phí</b></div></div><div class="mgr-chips"><span class="mgr-chip val">★ 200 điểm</span><span class="mgr-chip">Up size M→L</span><span class="mgr-chip">🟣 XOFA</span><span class="mgr-chip off">TẮT</span></div></div>
+          <div class="mgr-row gift"><div class="hd"><div class="ic">🎁</div><div class="info"><b>Giảm 10% toàn đơn</b></div></div><div class="mgr-chips"><span class="mgr-chip val">−10%</span><span class="mgr-chip">Phần trăm (%)</span><span class="mgr-chip">🔵 Cafe33</span><span class="mgr-chip on">BẬT</span></div></div>
+        </div>
+      </div>
+
+      <div id="mgr-b-screen" class="mgr-pane mgr-tile mgr-list">
+        <div class="mgr-list-head"><b>Slides <span id="slide-count">3</span></b><button class="mgr-btn sm" style="margin-left:auto" onclick="screenShowAddForm()">＋ Thêm slide</button></div>
+        <div class="mgr-rows" id="slide-list">
+          <div class="mgr-row" aria-pressed="true"><div class="mgr-thumb"></div><div class="info"><b>Slide 1 · 8 giây</b><small>https://i.ibb.co/abc/noel-banner.jpg</small></div><button class="mgr-btn sm icon del">✕</button></div>
+          <div class="mgr-row"><div class="mgr-thumb" style="background:linear-gradient(135deg,#fde68a,#f59e0b)"></div><div class="info"><b>Slide 2 · 10 giây</b><small>https://i.ibb.co/xyz/combo-bed.mp4</small></div><button class="mgr-btn sm icon">↑</button><button class="mgr-btn sm icon del">✕</button></div>
+          <div class="mgr-row"><div class="mgr-thumb" style="background:linear-gradient(135deg,#fecaca,#ef4444)"></div><div class="info"><b>Slide 3 · 8 giây</b><small>https://i.ibb.co/qrs/menu-moi.jpg</small></div><button class="mgr-btn sm icon">↑</button><button class="mgr-btn sm icon del">✕</button></div>
+        </div>
+      </div>
+
+      <div id="mgr-b-label" class="mgr-pane mgr-tile mgr-list" style="padding:16px">
+        <div class="mgr-list-head" style="padding:0"><b>Máy in</b><span class="mgr-chip off" id="lbl-status-pill" style="margin-left:auto">Chưa kết nối</span></div>
+        <button class="mgr-btn dark full" id="lbl-btn-ble">Kết nối MP583</button>
+        <h3 style="margin:4px 0 0;font-size:13px;color:var(--ink3)">Log</h3>
+        <div class="mgr-log" id="lbl-log">[10:21:04] Sẵn sàng.<br>[10:21:09] Chọn ảnh rồi bấm «In tem».</div>
+      </div>
+      <div id="mgr-b-sticker" style="display:none"></div>
+    </div>
+
+    <!-- ══ VÙNG BENTO ══ -->
+    <div id="mgr-col-c">
+      <!-- MENU -->
+      <div id="mgr-c-menueditor" class="mgr-pane">
+        <div class="mgr-edhead"><b id="menu-editor-form-title">Sửa: Cà phê sữa đá</b>
+          <button class="mgr-btn" onclick="menuEditorNewItem()">＋ Món mới</button>
+          <button class="mgr-btn del" id="menu-editor-delete-btn">Xoá món</button>
+          <button class="mgr-btn pri" onclick="menuEditorSave()" style="min-width:150px">Lưu món</button></div>
+        <div class="mgr-bento">
+          <div class="mgr-tile c4"><div class="mgr-field"><label for="me-name">Tên món</label><input class="mgr-input" id="me-name" value="Cà phê sữa đá" placeholder="VD: Cà phê sữa đá"></div></div>
+          <div class="mgr-tile c2"><div class="mgr-field"><label for="me-type">Phân loại</label><input class="mgr-input" id="me-type" value="Cà phê" placeholder="VD: Cà phê, Trà…"></div></div>
+          <div class="mgr-tile c3"><div class="mgr-field"><label for="me-price-m">Giá size M <span>(đ)</span></label><input class="mgr-input big" id="me-price-m" type="number" inputmode="numeric" value="25000" placeholder="VD: 35000"></div></div>
+          <div class="mgr-tile c3"><div class="mgr-field"><label for="me-price-l">Giá size L <span>(đ — bỏ trống nếu không có)</span></label><input class="mgr-input big" id="me-price-l" type="number" inputmode="numeric" value="30000" placeholder="VD: 40000"></div></div>
+          <div class="mgr-tile c6"><h3>Màu ô menu <em>Bấm để chọn</em></h3>
+            <div class="mgr-sw" id="me-color-swatches"><i class="on" style="background:#006241"></i><i style="background:#0e7490"></i><i style="background:#1d4ed8"></i><i style="background:#6d28d9"></i><i style="background:#be185d"></i><i style="background:#b91c1c"></i><i style="background:#d97706"></i><i style="background:#65a30d"></i><i style="background:#7c4a21"></i><i style="background:#3b2a1e"></i><i style="background:#475569"></i><i style="background:#111827"></i></div>
+            <div class="mgr-line" style="align-self:flex-start;padding-right:18px"><i style="width:30px;height:30px;border-radius:10px;background:#006241;display:block" id="me-custom-color-preview"></i><div><b>Màu tuỳ chỉnh</b><small>Chọn màu khác ngoài bảng</small></div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- QUÀ TẶNG -->
+      <div id="mgr-c-gift" class="mgr-pane">
+        <div class="mgr-edhead"><b id="discount-form-title">Sửa: Giảm 5k mì cay khô</b>
+          <button class="mgr-btn" onclick="giftVoucherAddNewBtn()">＋ Quà mới</button>
+          <button class="mgr-btn del" id="df-delete-btn">Xoá</button>
+          <button class="mgr-btn pri" onclick="discountFormSave()" style="min-width:170px">Lưu quà tặng</button></div>
+        <div class="mgr-bento">
+          <div class="mgr-tile"><h3>Thông tin quà</h3>
+            <div class="mgr-field"><label>Tên quà <span>(hiển thị cho khách)</span></label><input class="mgr-input" id="df-label" value="Giảm 5k mì cay khô"></div>
+            <div class="mgr-2" style="grid-template-columns:1fr 1.25fr">
+              <div class="mgr-field"><label>Mã khuyến mãi</label><input class="mgr-input big" id="df-code" value="GIAM5K" style="font-size:17px"></div>
+              <div class="mgr-field"><label>Áp dụng tại</label><select id="df-scope"><option>🔵 Cafe 33</option><option>🟣 XOFA</option><option>🟢 Cả 2 quán</option></select></div>
+            </div>
+            <div class="mgr-line"><div><b>Kích hoạt</b><small>Tắt để tạm ngưng</small></div><button class="mgr-switch" id="df-active-toggle" role="switch" aria-checked="true"></button></div>
+          </div>
+          <div class="mgr-tile"><h3>Quyền lợi</h3>
+            <div class="mgr-field"><label>Loại giảm giá</label>
+              <div class="mgr-pick"><button id="df-type-item" aria-pressed="true">Theo món</button><button id="df-type-order">Toàn đơn</button><button id="df-type-percent">Phần trăm (%)</button><button id="df-type-item_free">Miễn phí 1 ly</button><button id="df-type-item_upsize">Up size M→L</button></div></div>
+            <div class="mgr-2">
+              <div class="mgr-field"><label id="df-value-label">Số tiền giảm <span>(đ)</span></label><input class="mgr-input" id="df-value" type="number" value="5000"></div>
+              <div class="mgr-field"><label>Điểm đổi quà</label><input class="mgr-input" id="df-cost" type="number" value="500"></div>
+            </div>
+          </div>
+          <div class="mgr-tile r2 scroll" id="df-target-row"><h3>Món áp dụng <em>Chọn được nhiều</em></h3>
+            <div class="mgr-field"><label>🔵 The Cafe 33</label><input class="mgr-input sm" id="df-target-search-c33" placeholder="Tìm và thêm món Cafe 33…">
+              <div class="mgr-tagbox" id="df-chips-c33"><span class="mgr-tag">Mì cay khô <i>×</i></span><span class="mgr-tag">Mì cay nước <i>×</i></span></div></div>
+            <div class="mgr-field"><label>🟣 XOFA</label><input class="mgr-input sm" id="df-target-search-xl" placeholder="Tìm và thêm món XOFA…">
+              <div class="mgr-tagbox" id="df-chips-xl"><span class="mgr-tag x">Mì trộn sa tế <i>×</i></span></div></div>
+            <div class="mgr-field" id="df-condition-row" style="margin-top:auto;border-top:1px dashed var(--line);padding-top:12px"><label>Điều kiện lọc món <span>(chỉ loại «Miễn phí 1 ly» / «Up size»)</span></label>
+              <select id="df-cond-category" class="sm" style="height:44px;font-size:15px"><option>-- Tất cả danh mục --</option></select>
+              <div class="mgr-2"><input class="mgr-input sm" id="df-cond-minprice" type="number" placeholder="Giá từ"><input class="mgr-input sm" id="df-cond-maxprice" type="number" placeholder="Giá đến"></div></div>
+          </div>
+          <div class="mgr-tile c2"><h3>Hiển thị trên app khách &amp; giới hạn</h3>
+            <div style="display:grid;grid-template-columns:52px minmax(0,1.2fr) minmax(0,1.2fr) 130px;gap:12px;align-items:end">
+              <div id="df-img-preview" style="width:52px;height:52px;border-radius:15px;background:var(--field);display:grid;place-items:center;font-size:22px">🖼</div>
+              <div class="mgr-field"><label>Link ảnh</label><input class="mgr-input" id="df-img" placeholder="https://i.ibb.co/…"></div>
+              <div class="mgr-field"><label>Mô tả ngắn</label><input class="mgr-input" id="df-desc" value="Áp dụng 1 lần khi đến quán"></div>
+              <div class="mgr-field"><label>Giới hạn lượt</label><input class="mgr-input" id="df-limit" type="number" value="0"></div>
+            </div>
+            <p style="margin:0;font-size:12.5px;color:var(--ink3)">Giới hạn lượt = 0 là không giới hạn.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- MÀN HÌNH -->
+      <div id="mgr-c-screen" class="mgr-pane">
+        <div class="mgr-edhead"><b id="screen-form-title">Sửa slide 1</b>
+          <button class="mgr-btn" id="screen-add-btn" onclick="screenAddSlide()">Cập nhật vào danh sách</button>
+          <button class="mgr-btn pri" onclick="screenSaveSlides()" style="min-width:170px">Lưu thay đổi</button></div>
+        <div class="mgr-bento">
+          <div class="mgr-tile"><div class="mgr-field"><label for="slide-new-url">URL ảnh / video</label><textarea id="slide-new-url" rows="2" placeholder="https://…">https://i.ibb.co/abc/noel-banner.jpg</textarea></div></div>
+          <div class="mgr-tile"><div class="mgr-field"><label for="slide-new-duration">Thời gian hiển thị <span>(giây)</span></label><input class="mgr-input big" id="slide-new-duration" type="number" value="8"></div></div>
+          <div class="mgr-tile c2"><h3>Xem trước <em>Tỉ lệ 16:9</em></h3><div class="mgr-stage" id="slide-preview-box" style="background:linear-gradient(135deg,#cfe3d8,#8fbfa7)">Ảnh / video xem trước</div></div>
+        </div>
+      </div>
+
+      <!-- TEM -->
+      <div id="mgr-c-sticker" class="mgr-pane">
+        <div class="mgr-edhead"><b>Layout tem dán ly</b>
+          <button class="mgr-btn" onclick="stickerTestPrint()">In thử tem</button>
+          <button class="mgr-btn pri" onclick="stickerSaveConfig()" style="min-width:150px">Lưu</button></div>
+        <div class="mgr-bento">
+          <div class="mgr-tile r3"><h3>Xem trước tem</h3><div class="mgr-stage"><canvas id="sticker-layout-preview" width="320" height="240" style="background:#fff;border-radius:10px;box-shadow:0 4px 18px #0002;max-width:88%"></canvas></div><p style="margin:0;font-size:12.5px;color:var(--ink3);text-align:center">Tên món · Giá · Size thay đổi theo đơn hàng</p></div>
+          <div class="mgr-tile c2"><h3>Logo</h3><div class="mgr-pick"><button id="stk-logo-text-btn" aria-pressed="true">Chữ “The cafe 33”</button><button id="stk-logo-img-btn">Ảnh logo</button></div></div>
+          <div class="mgr-tile c2"><div class="mgr-field"><label for="stk-footer-text">Dòng cuối tem</label><textarea id="stk-footer-text" rows="2">Thank you so much
+luv u</textarea></div></div>
+          <div class="mgr-tile"><h3>Cỡ chữ tên món</h3><div class="mgr-step"><button class="mgr-btn">−</button><output id="stk-font-name-disp">34</output><button class="mgr-btn">+</button></div></div>
+          <div class="mgr-tile"><h3>Cỡ chữ footer</h3><div class="mgr-step"><button class="mgr-btn">−</button><output id="stk-font-footer-disp">19</output><button class="mgr-btn">+</button></div></div>
+        </div>
+      </div>
+
+      <!-- IN ẢNH -->
+      <div id="mgr-c-label" class="mgr-pane">
+        <div class="mgr-edhead"><b>In ảnh · MP583</b><small>58mm · 35×30mm</small>
+          <button class="mgr-btn pri" id="lbl-btn-print" disabled style="min-width:170px">🖨️ In tem</button></div>
+        <div class="mgr-bento">
+          <div class="mgr-tile"><h3>Ảnh cần in</h3><div class="mgr-drop" id="lbl-upload-zone">🖼️<br>Chọn hoặc kéo thả ảnh</div></div>
+          <div class="mgr-tile c2"><h3>Xem trước khi in <em id="lbl-preview-info">Chọn ảnh để xem</em></h3><div class="mgr-stage" style="min-height:84px"><canvas id="lbl-preview-canvas" width="0" height="0"></canvas></div></div>
+          <div class="mgr-tile"><h3>DPI dọc <em id="lbl-v-dpi">203 dpi</em></h3><div class="mgr-step"><button class="mgr-btn">−</button><output id="lbl-sd-dpi">203<small>dpi</small></output><button class="mgr-btn">+</button></div><p style="margin:0;font-size:12.5px;color:var(--ink3)">Tăng nếu ảnh bị nén · Giảm nếu bị giãn</p></div>
+          <div class="mgr-tile"><h3>Vị trí ngang <em id="lbl-v-off">+0 mm</em></h3><div class="mgr-step"><button class="mgr-btn">−</button><output id="lbl-sd-off">0<small>mm</small></output><button class="mgr-btn">+</button></div><p style="margin:0;font-size:12.5px;color:var(--ink3)">±4mm · 0 = tự căn giữa</p></div>
+          <div class="mgr-tile"><h3>Phóng to / Thu nhỏ <em id="lbl-v-scale">100%</em></h3><div class="mgr-step"><button class="mgr-btn">−</button><output id="lbl-sd-scale">100<small>%</small></output><button class="mgr-btn">+</button></div></div>
+          <div class="mgr-tile c2"><h3>Xoay / Lật</h3><div class="mgr-pick"><button id="lbl-btn-fliph">↔ Lật ngang</button><button id="lbl-btn-flipv">↕ Lật dọc</button><button id="lbl-btn-rot90">↻ Xoay 90°</button><button id="lbl-btn-rot180">↺ Xoay 180°</button></div></div>
+          <div class="mgr-tile"><h3>Làm mịn ảnh</h3><div class="mgr-line"><div><b>Dithering</b><small>Floyd-Steinberg</small></div><button class="mgr-switch" role="switch" aria-checked="false"></button></div></div>
+        </div>
+      </div>
+
+      <!-- GẤU NOEL / LÌ XÌ: khung do gau_noel_giangsinh.v2.js / pos_lixi.js tự dựng — GIỮ NGUYÊN -->
+      <div id="mgr-c-gaunoel" class="mgr-pane"><div class="mgr-tile" style="flex:1;align-items:center;justify-content:center;text-align:center;color:var(--ink2);border-style:dashed">
+        <div style="font-size:46px">🧸</div><b style="font-size:18px;color:var(--ink)">Gấu Noel — giữ nguyên như hiện tại</b>
+        <span style="max-width:460px;line-height:1.6;font-size:14.5px">Khung này (và «Lì xì 2027» ở bản Tết) do file theo mùa tự dựng. Thiết kế mới chỉ chừa chỗ: nút mục trên thanh và toàn bộ vùng làm việc, không sửa nội dung bên trong.</span></div></div>
+    </div>
+  </div>
+</div>
+<div class="note">MẪU — dữ liệu giả</div>
+
+<script>
+function switchMgrTab(tab){
+  ['menueditor','gift','screen','sticker','label','gaunoel'].forEach(function(t){
+    var on=t===tab,b=document.getElementById('mgr-tab-'+t),l=document.getElementById('mgr-b-'+t),c=document.getElementById('mgr-c-'+t);
+    if(b)b.setAttribute('aria-selected',String(on));
+    if(l&&t!=='sticker')l.classList.toggle('on',on);
+    if(c)c.classList.toggle('on',on);
+  });
+  document.querySelector('.mgr-workspace').classList.toggle('no-list',tab==='sticker'||tab==='gaunoel');
+  if(tab==='sticker')veTem();
+}
+function veTem(){var cv=document.getElementById('sticker-layout-preview'),x=cv.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,320,240);x.fillStyle='#111';x.textAlign='center';
+  x.font='800 26px system-ui';x.fillText('The cafe 33',160,44);x.fillRect(30,58,260,2);x.font='800 34px system-ui';x.fillText('Cà phê sữa đá',160,112);
+  x.font='600 20px system-ui';x.fillText('Size M  ·  25.000đ',160,146);x.fillRect(30,164,260,1);x.font='500 19px system-ui';x.fillText('Thank you so much',160,194);x.fillText('luv u',160,218);}
+function menuEditorNewItem(){}function menuEditorSave(){}function giftVoucherAddNewBtn(){}function discountFormSave(){}function screenShowAddForm(){}function screenAddSlide(){}function screenSaveSlides(){}function stickerTestPrint(){}function stickerSaveConfig(){}
+document.addEventListener('click',function(e){var b=e.target.closest('.mgr-pick button');if(b){b.parentNode.querySelectorAll('button').forEach(function(o){o.setAttribute('aria-pressed',String(o===b));});}
+  var s=e.target.closest('.mgr-switch');if(s)s.setAttribute('aria-checked',String(s.getAttribute('aria-checked')!=='true'));
+  var r=e.target.closest('.mgr-row');if(r&&!e.target.closest('button')){r.parentNode.querySelectorAll('.mgr-row').forEach(function(o){o.setAttribute('aria-pressed',String(o===r));});}});
+switchMgrTab((location.hash||'#menueditor').slice(1));
+</script>
+</body>
+</html>
