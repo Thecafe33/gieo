@@ -6,7 +6,7 @@ Mẫu duyệt: `docs/mau/mau_quanly_tc33_bento_v3.html` (v1 / v2 giữ để so)
 - **Thêm (chỉ hiển thị)**: ô «Xem trước ô menu» (`mgrMenuPreview`); viên chọn nhanh phân loại (thay danh sách xổ xuống, cùng nguồn nhóm món); đơn vị đ / % trong ô giá trị quà. Phần «Ảnh và mô tả» / «Giới hạn» của quà mở sẵn.
 - **Điểm neo file theo mùa giữ nguyên** (Gấu Noel v3 / `tools/tet/pos_lixi.js` không sửa): `mgr-tab-label`, `mgr-mob-tab-label`, `mgr-col-c`, `mgr-col-b-wrap`, `switchMgrTab` (chịu được tên mục lạ `__gaunoel__`).
 - **Kiểm**: `tools/ql_giao_dien/e2e_pos_manager_bento.js` (thay 4 file e2e cũ của giao diện 19/10) — markup + hàm thật với Firebase giả, 5 cỡ màn (1280×800 Mi Pad 7 ngang, 1366×768, 1600×1000, 1024×700, 390×844), 360 kiểm tra đạt cho cả `pos.html` và `pos_tet.html` (mục Lì xì). `sinh_lai_tat_ca.sh`: 6 FAIL mốc có sẵn (test 8, 11) + `gieo_automation_queue.test.js` hỏng CÓ SẴN trên nhánh (test còn so `VERSION == '21.0.0'` trong khi engine đã v22 — không liên quan pos.html, chưa sửa).
-- Chưa thử trên Mi Pad 7 thật (khung nhìn thật của APK chưa đo; lấy mốc chật 1280×800).
+- **13/11 (lượt 2) — chủ dự án chụp máy thật: vẫn phải cuộn.** Đo từ ảnh: khung nhìn Mi Pad 7 nằm ngang trong APK ≈ **1080×690** điểm CSS (không phải 1280×800 như đã giả định) → vùng soạn chỉ cao ~495px. Thêm khối `[GỌN]` (`@media (min-width:769px) and (max-height:740px)`): thu đệm / chiều cao phần tử (ô nhập ≥ 44px, nút ≥ 40px), giá M/L trong danh sách xếp dọc. e2e thêm cỡ 1080×690 với điều kiện «vùng soạn KHÔNG được cuộn» (cũng áp cho ≥ 1080 rộng) — 432 kiểm tra đạt (pos.html + pos_tet.html). Chờ chủ dự án thử lại trên máy.
 
 # 12/11 — Sửa lỗ hổng trừ kho / hao hụt F1–F4 (chủ dự án duyệt mặc định câu 1–4, bỏ câu 5) — CHƯA deploy
 

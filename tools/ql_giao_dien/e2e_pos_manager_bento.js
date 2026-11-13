@@ -14,7 +14,7 @@ const server=require('http').createServer((req,res)=>{const f=path.resolve(ROOT,
 const TABS=['menueditor','gift','screen','sticker','label'];
 (async()=>{await new Promise(r=>server.listen(0,'127.0.0.1',r));const base='http://127.0.0.1:'+server.address().port;const b=await chromium.launch();let n=0,fail=0;
 const check=(v,m)=>{n++;if(!v){fail++;console.log('  ✗ '+m)}};
-try{for(const [width,height,dsf] of [[1280,800,2],[1366,768,1],[1600,1000,1],[1024,700,1],[390,844,1]]){
+try{for(const [width,height,dsf] of [[1080,690,2],[1280,800,1],[1366,768,1],[1600,1000,1],[1024,700,1],[390,844,1]]){
  const pc=width>768,p=await b.newPage({viewport:{width,height},deviceScaleFactor:OUT?dsf:1});p.on('dialog',d=>d.dismiss());const errors=[];p.on('pageerror',e=>errors.push(e.stack||String(e)));
  await p.route('**/*',r=>{const u=r.request().url();if(u.includes('firebase-app-compat'))return r.fulfill({contentType:'application/javascript',body:mock});if(u.includes('firebasejs'))return r.fulfill({body:''});if(u.includes('cdn.tailwindcss.com'))return r.fulfill({contentType:'application/javascript',body:tw});if(u.startsWith(base+'/'))return r.continue();if(/fonts\.(googleapis|gstatic)\.com/.test(u))return r.continue().catch(()=>{});return r.abort()});
  await p.goto(base+'/'+(process.env.FILE||'pos.html'));await p.waitForTimeout(900);await p.evaluate(()=>switchView('discount'));await p.waitForTimeout(250);
@@ -26,8 +26,9 @@ try{for(const [width,height,dsf] of [[1280,800,2],[1366,768,1],[1600,1000,1],[10
  // mỗi mục: khung hiện, thanh thao tác đúng mục, không tràn ngang, PC không cuộn trang và ô không bị cắt
  const fit=async tab=>{const r=await p.evaluate(pc=>{const v=document.getElementById('view-discount'),o=[];if(v.scrollWidth>innerWidth+1)o.push('tràn ngang '+v.scrollWidth);
    if(pc){if(v.scrollHeight>v.clientHeight+1)o.push('cuộn trang '+v.scrollHeight+'>'+v.clientHeight);
+    if(innerWidth>=1080)document.querySelectorAll('#view-discount .mgr-pane.on .mgr-bento, #view-discount .mgr-pane.on .mgr-tile.scroll').forEach(e=>{if(e.scrollHeight>e.clientHeight+1)o.push('PHẢI CUỘN vùng soạn '+e.scrollHeight+'>'+e.clientHeight)});
     document.querySelectorAll('#view-discount .mgr-pane.on .mgr-tile:not(.scroll):not(.mgr-list), #view-discount .mgr-top').forEach(e=>{if(e.scrollHeight>e.clientHeight+1||e.scrollWidth>e.clientWidth+1)o.push('ô bị cắt: '+(e.querySelector('h3')||e).textContent.trim().slice(0,24)+' '+e.scrollHeight+'>'+e.clientHeight+' / '+e.scrollWidth+'>'+e.clientWidth)});
-    document.querySelectorAll('#view-discount .mgr-pane.on input:not([type=hidden]):not([type=file]):not([type=checkbox]):not([type=color]), #view-discount .mgr-pane.on select, #view-discount .mgr-pane.on textarea').forEach(e=>{const b=e.getBoundingClientRect();if(e.offsetParent&&(b.height<44||b.right>innerWidth+1||(innerWidth>=1280&&b.bottom>innerHeight+1)))o.push('ô nhập '+e.id+' '+Math.round(b.height)+'px / đáy '+Math.round(b.bottom))});
+    document.querySelectorAll('#view-discount .mgr-pane.on input:not([type=hidden]):not([type=file]):not([type=checkbox]):not([type=color]), #view-discount .mgr-pane.on select, #view-discount .mgr-pane.on textarea').forEach(e=>{const b=e.getBoundingClientRect();if(e.offsetParent&&(b.height<44||b.right>innerWidth+1||(innerWidth>=1080&&b.bottom>innerHeight+1)))o.push('ô nhập '+e.id+' '+Math.round(b.height)+'px / đáy '+Math.round(b.bottom))});
     document.querySelectorAll('#view-discount .mgr-acts .mgr-act.on button, #view-discount .mgr-seg button').forEach(e=>{const b=e.getBoundingClientRect();if(e.offsetParent&&(b.right>innerWidth+1||b.height<40))o.push('nút ngoài màn: '+e.textContent.trim())});}
    return o},pc);check(r.length===0,W+tab+' bố cục: '+r.join(' | '));if(OUT)await p.screenshot({path:path.join(OUT,width+'_'+tab+'.png')})};
  check(await p.locator('#menu-editor-list [data-key]').count()===34,W+'34 món');
