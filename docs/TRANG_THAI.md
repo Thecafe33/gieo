@@ -1,3 +1,13 @@
+# 13/11 — pos.html (TC33): tab Quản lý viết lại giao diện kiểu bento tối giản (chủ dự án duyệt mẫu v3 12/11) — CHƯA deploy
+
+Mẫu duyệt: `docs/mau/mau_quanly_tc33_bento_v3.html` (v1 / v2 giữ để so). Chỉ giao diện — không đổi dữ liệu / luồng lưu. Gói giao: `giao_file/dot_13-11_pos_quanly/`.
+- **Bỏ hẳn giao diện cũ**: HTML viết style inline + 4 lớp CSS vá (khối «FIX Mobile», lớp «MÀN QUẢN LÝ BẢN PC» 12/10, `pos-manager-widgets` 19/10) → một khối `<style id="pos-manager-bento">` + markup dùng class `mgr-*`. Các hàm vẽ (`switchMgrTab`, `renderDiscountList`, `screenRenderList`, `menuEditorLoad`, `dfSetType`…) đổi sang class / `aria-*`, không còn tô màu bằng `style=`.
+- **Bố cục**: hàng trên = thanh mục (trái) + tên đang soạn + nút «＋ mới / Xoá / Lưu» của mục đang mở (phải, luôn thấy); dưới = cột danh sách (ô tìm luôn hiện) + vùng soạn chia ô. Menu xếp theo thứ tự nhập Tên → Phân loại → Giá M → Giá L → Màu. Thiếu chỗ (màn < 1280 hoặc thấp) thì vùng soạn tự cuộn, ô không bị cắt. Điện thoại: 1 cột, thanh mục + nút ghim trên cùng.
+- **Thêm (chỉ hiển thị)**: ô «Xem trước ô menu» (`mgrMenuPreview`); viên chọn nhanh phân loại (thay danh sách xổ xuống, cùng nguồn nhóm món); đơn vị đ / % trong ô giá trị quà. Phần «Ảnh và mô tả» / «Giới hạn» của quà mở sẵn.
+- **Điểm neo file theo mùa giữ nguyên** (Gấu Noel v3 / `tools/tet/pos_lixi.js` không sửa): `mgr-tab-label`, `mgr-mob-tab-label`, `mgr-col-c`, `mgr-col-b-wrap`, `switchMgrTab` (chịu được tên mục lạ `__gaunoel__`).
+- **Kiểm**: `tools/ql_giao_dien/e2e_pos_manager_bento.js` (thay 4 file e2e cũ của giao diện 19/10) — markup + hàm thật với Firebase giả, 5 cỡ màn (1280×800 Mi Pad 7 ngang, 1366×768, 1600×1000, 1024×700, 390×844), 360 kiểm tra đạt cho cả `pos.html` và `pos_tet.html` (mục Lì xì). `sinh_lai_tat_ca.sh`: 6 FAIL mốc có sẵn (test 8, 11) + `gieo_automation_queue.test.js` hỏng CÓ SẴN trên nhánh (test còn so `VERSION == '21.0.0'` trong khi engine đã v22 — không liên quan pos.html, chưa sửa).
+- Chưa thử trên Mi Pad 7 thật (khung nhìn thật của APK chưa đo; lấy mốc chật 1280×800).
+
 # 12/11 — Sửa lỗ hổng trừ kho / hao hụt F1–F4 (chủ dự án duyệt mặc định câu 1–4, bỏ câu 5) — CHƯA deploy
 
 [Kế hoạch + nhật ký](KE_HOACH_FIX_TRU_KHO_HAO_HUT_12-11.md) · [Báo cáo rà soát](RA_SOAT_TRU_KHO_HAO_HUT_12-11.md). Không thêm màn / bước / chữ nào cho nhân viên; không thêm vòng mạng vào thanh toán.

@@ -35,6 +35,7 @@
 - CK TC33 = luồng VietQR như posgieo, không PayOS. Chi tiết các việc cũ: `docs/luu_tru/CLAUDE_MD_DAY_DU_27-10-2026.md`.
 - **Vé đặt bed** (04/11, đã push): `_bsTicketSvg` / `_bsTicketInfo` trong `index.html` — modal Đặt thành công + «Lịch trình hôm nay» (nút Đổi giờ / Huỷ dưới vé, ≥ 2 lịch trượt ngang). Ảnh Nội quy / Thoả thuận miễn trừ trên Firebase Storage.
 - **Combo bed không nước** (06/11, ĐANG CHUẨN BỊ — mẫu đã render, chưa code): tối đa 2 người, khung mặc định 08:30–12:30 T2–T7, giá 45/69/89/105K, giờ chẵn, không voucher; sau 4h +30K, +40K…; khách vãng lai luôn tính theo giờ. Công tắc + cấu hình ở POS (trên nút giờ đóng bed); app khách đặt bed theo từng bước. Thêm tên dòng combo vào `_isKhacLine` (pos) và `tcIsKhacLine` (manage).
+- **Tab Quản lý `pos.html` kiểu bento** (13/11, chưa deploy): một khối `<style id="pos-manager-bento">` + class `mgr-*`, mẫu `docs/mau/mau_quanly_tc33_bento_v3.html`; xanh `#006241` + đen, phông Inter. Giữ điểm neo file theo mùa: `mgr-tab-label`, `mgr-mob-tab-label`, `mgr-col-c`, `mgr-col-b-wrap`, `switchMgrTab`. Kiểm: `tools/ql_giao_dien/e2e_pos_manager_bento.js` (cần `TAILWIND_CSS`).
 
 ## Kế hoạch & tài liệu
 - **Đọc trước tiên: `docs/TRANG_THAI.md`** (bản hiện hành, việc còn mở, bản đồ tài liệu).

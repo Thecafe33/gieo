@@ -1,5 +1,7 @@
 # Quản lý POS The Cafe 33 trên PC — 19/10/2026
 
+> **13/11/2026 — ĐÃ THAY**: giao diện mô tả dưới đây (19/10) đã được viết lại kiểu bento, xem mục 13/11 trong `docs/TRANG_THAI.md`. Các file `e2e_pos_manager*.js`, `e2e_pos_fast_form.js`, `e2e_pos_list_density.js` nhắc bên dưới đã bỏ, thay bằng `tools/ql_giao_dien/e2e_pos_manager_bento.js`. Tài liệu này chỉ còn để tra cứu.
+
 Phạm vi chủ dự án xác nhận: toàn bộ nhóm quản lý thường xuyên trong `pos.html`, không chỉ form Menu. Giữ Gấu Noel và Lì xì Tết theo mùa.
 
 ## Bố cục theo từng công việc
