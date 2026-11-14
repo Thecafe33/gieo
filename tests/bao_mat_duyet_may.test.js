@@ -51,7 +51,7 @@ const QL = { uid: 'u1', email: cfg.quanLyEmails[0] }, LA = { uid: 'may_x', email
   await core.quanLy({ viec: 'tu_choi', id: y2.id }, QL);
   const r2 = await core.nhanQuyen({ id: y2.id, khoa: y2.khoa });
   ok(r2.trangThai === 'tu_choi' && !r2.ve, 'bị từ chối → không có vé');
-  const y3 = await core.xinDuyet({ ten: 'Chậm', app: 'kiosk' });
+  const y3 = await core.xinDuyet({ ten: 'Chậm', app: 'posx' });
   t += cfg.hanXinDuyetPhut * 60e3 + 1;
   ok((await core.nhanQuyen({ id: y3.id, khoa: y3.khoa })).trangThai === 'het_han', 'quá 15 phút → hết hạn');
   await nem(core.quanLy({ viec: 'duyet', id: y3.id }, QL), 'het_han', 'không duyệt được yêu cầu hết hạn');
@@ -62,6 +62,7 @@ const QL = { uid: 'u1', email: cfg.quanLyEmails[0] }, LA = { uid: 'may_x', email
   for (let i = 0; i < cfg.toiDaChoDuyet - 1; i++) await core.xinDuyet({ ten: 's' + i, app: 'pos' });
   await nem(core.xinDuyet({ ten: 'tràn', app: 'pos' }), 'qua_nhieu_yeu_cau', 'quá ' + cfg.toiDaChoDuyet + ' yêu cầu chờ → chặn');
   await nem(core.xinDuyet({ ten: 'x', app: 'index' }), 'app_khong_hop_le', 'app không thuộc danh sách bị chặn');
+  await nem(core.xinDuyet({ ten: 'x', app: 'kiosk' }), 'app_khong_hop_le', 'kiosk không qua duyệt máy (giữ đăng nhập cũ)');
 
   // 4. Máy đang chạy tự chuyển
   await nem(core.tuChuyen({ ten: 'x', app: 'posgieo' }, LA), 'khong_co_quyen', 'tự chuyển: phải đang giữ phiên tài khoản chung');

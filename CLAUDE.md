@@ -22,7 +22,7 @@
 - Chỉ bán to-go. Không mã giảm giá / voucher — khuyến mãi chỉ ở `togoSettings_gieogieo` và `sales_assist_config_gieogieo`. Tích luỹ = tem → ly miễn phí.
 - Đã loại: kiosk / màn hình phụ, Ví, Đồng giá, service worker.
 - Tài nguyên dùng chung XOFA / TC33 — **không đổi cấu trúc**: `customers`, `rewards`, `bank_confirmations`, `kiosk_config`, tài khoản đăng nhập chung. Rules: đã đăng nhập = toàn quyền.
-- **Bảo mật (14/11, đang làm — `docs/KE_HOACH_BAO_MAT_BACKEND_14-11.md`)**: bỏ mật khẩu đăng nhập chung + mã quản lý khỏi mã nguồn. Đã chốt: duyệt máy mới / đổi mật khẩu / cấu hình mã quản lý đều ở `manage.html`; duyệt máy qua `functions/baomat` (codebase riêng `gieo-baomat`, không gộp vào worker); khoá Google Sheets trong `pos.html` **giữ nguyên, không đụng**. Không gọi function trong luồng bán.
+- **Bảo mật (14/11, đợt 1 xong, chưa deploy — `docs/KE_HOACH_BAO_MAT_BACKEND_14-11.md`)**: làm sẵn, **không bắt buộc gì cho tới khi chủ dự án tự đổi mật khẩu** (bảo mật chưa phải ưu tiên). Duyệt máy mới / mã quản lý / đổi mật khẩu đều ở `manage.html` mục «Bảo mật»; duyệt máy qua `functions/baomat` (codebase riêng `gieo-baomat`, không gộp vào worker). **Kiosk đứng ngoài** (giữ đăng nhập cũ, không đổi mật khẩu tài khoản `elio@…`). Khoá Google Sheets trong `pos.html` **giữ nguyên**. Mã quản lý lưu dạng đọc được (chủ dự án muốn mở ra là thấy). Không gọi function trong luồng bán.
 
 ## Kho (Unit Engine) & đa cửa hàng
 - **Tem = sự thật**: tồn = Σ tem sealed + Σ `unitBase` tem đang mở; khoản không gắn được → Sổ lệch. Bất biến **B1–B16** (mục 2.1 `docs/KE_HOACH_UNIT_ENGINE_DA_CUA_HANG.md`) — mọi thay đổi phải giữ. POS và Quản lý lệch nhau → theo POS.
@@ -35,6 +35,7 @@
 - CK TC33 = luồng VietQR như posgieo, không PayOS. Chi tiết các việc cũ: `docs/luu_tru/CLAUDE_MD_DAY_DU_27-10-2026.md`.
 - **Vé đặt bed** (04/11, đã push): `_bsTicketSvg` / `_bsTicketInfo` trong `index.html` — modal Đặt thành công + «Lịch trình hôm nay» (nút Đổi giờ / Huỷ dưới vé, ≥ 2 lịch trượt ngang). Ảnh Nội quy / Thoả thuận miễn trừ trên Firebase Storage.
 - **Combo bed không nước** (06/11, ĐANG CHUẨN BỊ — mẫu đã render, chưa code): tối đa 2 người, khung mặc định 08:30–12:30 T2–T7, giá 45/69/89/105K, giờ chẵn, không voucher; sau 4h +30K, +40K…; khách vãng lai luôn tính theo giờ. Công tắc + cấu hình ở POS (trên nút giờ đóng bed); app khách đặt bed theo từng bước. Thêm tên dòng combo vào `_isKhacLine` (pos) và `tcIsKhacLine` (manage).
+- **Mục «Bảo mật» của `manage.html`** (14/11, chưa deploy): `<style id="manage-bao-mat">` + class `bm-*`, hàm `bm*` / `readBaoMat` / `writeMaQuanLy` / `doiMatKhau`; mẫu duyệt `docs/mau/mau_manage_bao_mat_v4.html`. Kiểm: `tools/ql_giao_dien/e2e_manage_bao_mat.js`.
 - **Tab Quản lý `pos.html` kiểu bento** (13/11, chưa deploy): một khối `<style id="pos-manager-bento">` + class `mgr-*`, mẫu `docs/mau/mau_quanly_tc33_bento_v3.html`; xanh `#006241` + đen, phông Inter. Giữ điểm neo file theo mùa: `mgr-tab-label`, `mgr-mob-tab-label`, `mgr-col-c`, `mgr-col-b-wrap`, `switchMgrTab`. Kiểm: `tools/ql_giao_dien/e2e_pos_manager_bento.js` (cần `TAILWIND_CSS`).
 
 ## Kế hoạch & tài liệu

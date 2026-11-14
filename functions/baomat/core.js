@@ -11,7 +11,9 @@
 const crypto = require('crypto');
 
 const CHU_MA = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // bỏ 0/O/1/I dễ nhầm
-const APP_HOP_LE = new Set(['posgieo', 'pos', 'posx', 'kiosk', 'quanlygieo', 'kiem_toan_kho']);
+// kiosk.html KHÔNG nằm trong danh sách (chủ dự án chốt 14/11): màn hình phụ khó nhập liệu, khách không thể chờ duyệt —
+// kiosk giữ cách đăng nhập cũ.
+const APP_HOP_LE = new Set(['posgieo', 'pos', 'posx', 'quanlygieo', 'kiem_toan_kho']);
 
 class LoiBaoMat extends Error {
   constructor(ma, http) { super(ma); this.ma = ma; this.http = http || 400; }

@@ -1,6 +1,9 @@
-# 14/11 — Giấu mật khẩu / mã quản lý khỏi mã nguồn (bản 3, đường A) — ĐANG LÀM, chưa deploy, chưa app nào đổi
+# 14/11 — Bảo mật: duyệt máy + mã quản lý + đổi mật khẩu ở manage — ĐỢT 1 XONG, CHƯA deploy
 
-[Kế hoạch + nhật ký](KE_HOACH_BAO_MAT_BACKEND_14-11.md). Chủ dự án chốt 14/11: khoá Google Sheets trong `pos.html` **giữ nguyên**; máy mới **duyệt ở `manage.html`**; mật khẩu chung **sẽ đổi, đổi trong manage**; mọi mã quản lý (Gieo + XOFA) **cấu hình ở manage**; duyệt máy bằng Cloud Functions nhỏ (đường A). **Xong:** `functions/baomat/` (hàm HTTP `gieoBaoMat`, collection `may_duoc_duyet`) + `tests/bao_mat_duyet_may.test.js`. **Chờ duyệt mẫu:** `docs/mau/mau_manage_bao_mat_v4.html` (thẻ màu theo quán chứa máy + mã quản lý hiện sẵn giá trị → mã lưu dạng đọc được, không băm; v1–v3 giữ để so). **Chưa làm:** mục Bảo mật trong manage, `ma_quan_ly.v1.js` (5 mã → Firestore, JS đã phát hành → `vN+1`), `kich_hoat_may.v1.js` (6 app bỏ mật khẩu viết cứng, máy cũ tự chuyển, máy mới hiện mã chờ duyệt).
+[Kế hoạch + nhật ký](KE_HOACH_BAO_MAT_BACKEND_14-11.md). Chủ dự án: bảo mật chưa phải ưu tiên — **làm sẵn, không bắt buộc gì cho tới khi tự đổi mật khẩu**; khoá Google Sheets trong `pos.html` giữ nguyên; **kiosk đứng ngoài** (giữ đăng nhập cũ).
+- **Xong (chưa deploy):** `functions/baomat/` (hàm HTTP `gieoBaoMat`, collection `may_duoc_duyet`; codebase riêng `gieo-baomat`); `manage.html` mục «Bảo mật» — thẻ màu từng quán chứa máy chờ duyệt / đang dùng + mã quản lý hiện sẵn (`cau_hinh_bao_mat/ma_quan_ly`), đổi mật khẩu tài khoản quản lý; `ensureAuth` của manage dùng phiên đã lưu, mật khẩu đã đổi thì hỏi một lần. Kiểm: `tests/bao_mat_duyet_may.test.js`, `tests/manage_bao_mat.test.js`, `tools/ql_giao_dien/e2e_manage_bao_mat.js`.
+- **Chưa làm:** đợt 2 — posgieo / PosX đọc mã quản lý từ cấu hình (`ma_quan_ly.v1.js`; hiện mã đặt ở manage chưa có tác dụng ở POS); đợt 3–4 — `kich_hoat_may.v1.js` cho 5 app (máy cũ tự chuyển, máy mới hiện mã chờ duyệt).
+- **Khi deploy đợt 1 chủ dự án cần (một lần):** thêm codebase `gieo-baomat` vào `~/MyCafeWeb/firebase.json`; gán vai trò Service Account Token Creator cho tài khoản chạy function.
 
 # 13/11 — pos.html (TC33): tab Quản lý viết lại giao diện kiểu bento tối giản (chủ dự án duyệt mẫu v3 12/11) — CHƯA deploy
 
