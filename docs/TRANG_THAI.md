@@ -1,6 +1,6 @@
-# 14/11 — Kế hoạch đưa mã / mật khẩu bí mật vào backend — CHỜ DUYỆT, chưa sửa mã
+# 14/11 — Kế hoạch giấu mật khẩu / mã quản lý khỏi mã nguồn (bản 2) — CHỜ DUYỆT, chưa sửa mã
 
-[Kế hoạch](KE_HOACH_BAO_MAT_BACKEND_14-11.md) (rà soát 8 app, 5 đợt, điều cần tránh, phân việc, 5 câu hỏi Q1–Q5). **Khẩn — chủ dự án làm ở Console (Đợt 0):** `pos.html` chứa nguyên khoá riêng của tài khoản dịch vụ Google `bot-sheet` (`SHEETS_CONFIG.PRIVATE_KEY`) → xoá khoá đó. Còn lại: mật khẩu tài khoản Firebase chung viết cứng ở 7 file, 5 mã quản lý viết cứng (posgieo / PosX), Ví app khách kiểm PIN ở máy khách. `firebaseConfig` không phải bí mật — bảo vệ bằng Rules + App Check, không chuyển vào backend. Chưa có trong repo: 3 bộ rules, mã `syncMenu` / `syncCustomers`.
+[Kế hoạch](KE_HOACH_BAO_MAT_BACKEND_14-11.md). Chủ dự án chốt 14/11: khoá Google Sheets trong `pos.html` **giữ nguyên, không đụng**; không Cloud Functions, không đổi rules. Hai việc: (1) bỏ mật khẩu tài khoản Firebase chung khỏi 7 app — máy dùng phiên đã lưu, máy mới nhập một lần ở màn «Kích hoạt máy» (`kich_hoat_may.v1.js`); (2) 5 mã quản lý (posgieo / PosX) chuyển lên Firestore dạng băm, đổi mã trong quanlygieo (`ma_quan_ly.v1.js`, các JS đã phát hành → `vN+1`). Chờ trả lời Q1–Q3.
 
 # 13/11 — pos.html (TC33): tab Quản lý viết lại giao diện kiểu bento tối giản (chủ dự án duyệt mẫu v3 12/11) — CHƯA deploy
 
