@@ -1,3 +1,7 @@
+# 14/11 — Kế hoạch đưa mã / mật khẩu bí mật vào backend — CHỜ DUYỆT, chưa sửa mã
+
+[Kế hoạch](KE_HOACH_BAO_MAT_BACKEND_14-11.md) (rà soát 8 app, 5 đợt, điều cần tránh, phân việc, 5 câu hỏi Q1–Q5). **Khẩn — chủ dự án làm ở Console (Đợt 0):** `pos.html` chứa nguyên khoá riêng của tài khoản dịch vụ Google `bot-sheet` (`SHEETS_CONFIG.PRIVATE_KEY`) → xoá khoá đó. Còn lại: mật khẩu tài khoản Firebase chung viết cứng ở 7 file, 5 mã quản lý viết cứng (posgieo / PosX), Ví app khách kiểm PIN ở máy khách. `firebaseConfig` không phải bí mật — bảo vệ bằng Rules + App Check, không chuyển vào backend. Chưa có trong repo: 3 bộ rules, mã `syncMenu` / `syncCustomers`.
+
 # 13/11 — pos.html (TC33): tab Quản lý viết lại giao diện kiểu bento tối giản (chủ dự án duyệt mẫu v3 12/11) — CHƯA deploy
 
 Mẫu duyệt: `docs/mau/mau_quanly_tc33_bento_v3.html` (v1 / v2 giữ để so). Chỉ giao diện — không đổi dữ liệu / luồng lưu. Gói giao: `giao_file/dot_13-11_pos_quanly/`.
