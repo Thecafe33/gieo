@@ -22,7 +22,7 @@
 - Chỉ bán to-go. Không mã giảm giá / voucher — khuyến mãi chỉ ở `togoSettings_gieogieo` và `sales_assist_config_gieogieo`. Tích luỹ = tem → ly miễn phí.
 - Đã loại: kiosk / màn hình phụ, Ví, Đồng giá, service worker.
 - Tài nguyên dùng chung XOFA / TC33 — **không đổi cấu trúc**: `customers`, `rewards`, `bank_confirmations`, `kiosk_config`, tài khoản đăng nhập chung. Rules: đã đăng nhập = toàn quyền.
-- **Việc chờ, không tự đụng**: giấu mật khẩu đăng nhập chung + mã quản lý khỏi mã nguồn — kế hoạch `docs/KE_HOACH_BAO_MAT_BACKEND_14-11.md` (bản 2, chờ duyệt Q1–Q3; chưa duyệt thì chưa sửa mã). Khoá Google Sheets trong `pos.html`: chủ dự án chốt **giữ nguyên**.
+- **Việc chờ, không tự đụng**: giấu mật khẩu đăng nhập chung + mã quản lý khỏi mã nguồn — kế hoạch `docs/KE_HOACH_BAO_MAT_BACKEND_14-11.md` (bản 3; chủ dự án chốt: duyệt máy mới / đổi mật khẩu / cấu hình mã quản lý đều ở `manage.html`; còn chờ chốt đường A / B rồi mới sửa mã). Khoá Google Sheets trong `pos.html`: chốt **giữ nguyên**.
 
 ## Kho (Unit Engine) & đa cửa hàng
 - **Tem = sự thật**: tồn = Σ tem sealed + Σ `unitBase` tem đang mở; khoản không gắn được → Sổ lệch. Bất biến **B1–B16** (mục 2.1 `docs/KE_HOACH_UNIT_ENGINE_DA_CUA_HANG.md`) — mọi thay đổi phải giữ. POS và Quản lý lệch nhau → theo POS.
