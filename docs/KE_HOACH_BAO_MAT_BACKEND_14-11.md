@@ -1,4 +1,4 @@
-# Kế hoạch giấu mật khẩu / mã quản lý khỏi mã nguồn (14/11, bản 3) — CHỜ CHỐT 1 CÂU, chưa sửa dòng mã nào
+# Kế hoạch giấu mật khẩu / mã quản lý khỏi mã nguồn (14/11, bản 3) — ĐANG LÀM: đường A đã chốt; backend duyệt máy xong, mẫu giao diện manage chờ duyệt
 
 Chủ dự án đã chốt 14/11:
 - Khoá Google Sheets trong `pos.html`: **giữ nguyên, không đụng**.
@@ -107,6 +107,9 @@ Thứ tự khởi động sau khi có phiên (`_menuInited`, `initMenu`, listene
 
 Claude không bao giờ chạy deploy.
 
-## 9. Câu còn chờ chốt
+## 9. Nhật ký
 
-- **Chọn đường A hay B ở mục 2?** Đề xuất A. Chọn A nghĩa là chấp nhận: thêm một codebase Functions nhỏ + một lần gán vai trò ở Console.
+- **14/11 — chủ dự án chốt đường A** («cách nào an toàn, đơn giản, rủi ro thấp, ít đổi vận hành thì làm»).
+- **14/11 — xong phần backend duyệt máy (chưa deploy, chưa app nào gọi):** `functions/baomat/` — `core.js` (lõi, không phụ thuộc Firebase), `index.js` (một hàm HTTP `gieoBaoMat`, vùng `asia-southeast1`, nhận `viec` = `xin_duyet` / `nhan_quyen` / `tu_chuyen` / `duyet` / `tu_choi` / `thu_hoi` / `doi_ten`), `cau_hinh.json` (email tài khoản quản lý, collection `may_duoc_duyet`, hạn 15 phút, tối đa 10 yêu cầu chờ). Test `tests/bao_mat_duyet_may.test.js` (25 kiểm tra).
+- **14/11 — mẫu giao diện chờ duyệt:** `docs/mau/mau_manage_bao_mat_v1.html` (ảnh `docs/mau/anh/mau_manage_bao_mat_v1_{pc,dt}.png`) — mục «Bảo mật» của manage (Máy chờ duyệt, Máy đang dùng, Mã quản lý, Đổi mật khẩu) + màn «Máy chờ duyệt» ở máy + màn đăng nhập manage. **Chưa sửa `manage.html` / POS** — chờ chủ dự án duyệt mẫu.
+- Việc kế tiếp sau khi duyệt mẫu: đợt 1 (manage) → đợt 2 (`ma_quan_ly.v1.js`) → đợt 3–4 (`kich_hoat_may.v1.js`).

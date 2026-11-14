@@ -1,6 +1,6 @@
-# 14/11 — Kế hoạch giấu mật khẩu / mã quản lý khỏi mã nguồn (bản 3) — chờ chốt đường A / B, chưa sửa mã
+# 14/11 — Giấu mật khẩu / mã quản lý khỏi mã nguồn (bản 3, đường A) — ĐANG LÀM, chưa deploy, chưa app nào đổi
 
-[Kế hoạch](KE_HOACH_BAO_MAT_BACKEND_14-11.md). Chủ dự án chốt 14/11: khoá Google Sheets trong `pos.html` **giữ nguyên**; máy mới **duyệt ở `manage.html`**; mật khẩu chung **sẽ đổi, đổi trong manage**; mọi mã quản lý (Gieo + XOFA) **cấu hình ở manage**. Ba việc: (1) `kich_hoat_may.v1.js` — máy dùng phiên đã lưu, máy đang chạy tự chuyển sang danh tính riêng, máy mới hiện mã chờ duyệt; (2) manage: đăng nhập một lần + mục Thiết bị / Đổi mật khẩu / Mã quản lý; (3) `ma_quan_ly.v1.js` — 5 mã lên Firestore dạng băm, JS đã phát hành → `vN+1`. Duyệt máy cần backend: đề xuất đường A = 3 hàm nhỏ ở codebase mới `functions/baomat` (đường B = ẩn danh + sửa 3 bộ rules).
+[Kế hoạch + nhật ký](KE_HOACH_BAO_MAT_BACKEND_14-11.md). Chủ dự án chốt 14/11: khoá Google Sheets trong `pos.html` **giữ nguyên**; máy mới **duyệt ở `manage.html`**; mật khẩu chung **sẽ đổi, đổi trong manage**; mọi mã quản lý (Gieo + XOFA) **cấu hình ở manage**; duyệt máy bằng Cloud Functions nhỏ (đường A). **Xong:** `functions/baomat/` (hàm HTTP `gieoBaoMat`, collection `may_duoc_duyet`) + `tests/bao_mat_duyet_may.test.js`. **Chờ duyệt mẫu:** `docs/mau/mau_manage_bao_mat_v1.html`. **Chưa làm:** mục Bảo mật trong manage, `ma_quan_ly.v1.js` (5 mã → Firestore dạng băm, JS đã phát hành → `vN+1`), `kich_hoat_may.v1.js` (6 app bỏ mật khẩu viết cứng, máy cũ tự chuyển, máy mới hiện mã chờ duyệt).
 
 # 13/11 — pos.html (TC33): tab Quản lý viết lại giao diện kiểu bento tối giản (chủ dự án duyệt mẫu v3 12/11) — CHƯA deploy
 
