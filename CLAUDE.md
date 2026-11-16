@@ -22,7 +22,7 @@
 - Chỉ bán to-go. Không mã giảm giá / voucher — khuyến mãi chỉ ở `togoSettings_gieogieo` và `sales_assist_config_gieogieo`. Tích luỹ = tem → ly miễn phí.
 - Đã loại: kiosk / màn hình phụ, Ví, Đồng giá, service worker.
 - Tài nguyên dùng chung XOFA / TC33 — **không đổi cấu trúc**: `customers`, `rewards`, `bank_confirmations`, `kiosk_config`, tài khoản đăng nhập chung. Rules: đã đăng nhập = toàn quyền.
-- **Việc chờ, không tự đụng**: chuyển mã / mật khẩu bí mật vào backend (hỏi chủ quán trước khi bắt đầu).
+- **Bảo mật (14/11, đợt 1 xong, chưa deploy — `docs/KE_HOACH_BAO_MAT_BACKEND_14-11.md`)**: làm sẵn, **không bắt buộc gì cho tới khi chủ dự án tự đổi mật khẩu** (bảo mật chưa phải ưu tiên). Duyệt máy mới / mã quản lý / đổi mật khẩu đều ở `manage.html` mục «Bảo mật»; duyệt máy qua `functions/baomat` (codebase riêng `gieo-baomat`, không gộp vào worker). **Kiosk đứng ngoài** (giữ đăng nhập cũ, không đổi mật khẩu tài khoản `elio@…`). Khoá Google Sheets trong `pos.html` **giữ nguyên**. Mã quản lý lưu dạng đọc được (chủ dự án muốn mở ra là thấy). Không gọi function trong luồng bán.
 
 ## Kho (Unit Engine) & đa cửa hàng
 - **Tem = sự thật**: tồn = Σ tem sealed + Σ `unitBase` tem đang mở; khoản không gắn được → Sổ lệch. Bất biến **B1–B16** (mục 2.1 `docs/KE_HOACH_UNIT_ENGINE_DA_CUA_HANG.md`) — mọi thay đổi phải giữ. POS và Quản lý lệch nhau → theo POS.
@@ -35,12 +35,14 @@
 - CK TC33 = luồng VietQR như posgieo, không PayOS. Chi tiết các việc cũ: `docs/luu_tru/CLAUDE_MD_DAY_DU_27-10-2026.md`.
 - **Vé đặt bed** (04/11, đã push): `_bsTicketSvg` / `_bsTicketInfo` trong `index.html` — modal Đặt thành công + «Lịch trình hôm nay» (nút Đổi giờ / Huỷ dưới vé, ≥ 2 lịch trượt ngang). Ảnh Nội quy / Thoả thuận miễn trừ trên Firebase Storage.
 - **Combo bed không nước** (06/11, ĐANG CHUẨN BỊ — mẫu đã render, chưa code): tối đa 2 người, khung mặc định 08:30–12:30 T2–T7, giá 45/69/89/105K, giờ chẵn, không voucher; sau 4h +30K, +40K…; khách vãng lai luôn tính theo giờ. Công tắc + cấu hình ở POS (trên nút giờ đóng bed); app khách đặt bed theo từng bước. Thêm tên dòng combo vào `_isKhacLine` (pos) và `tcIsKhacLine` (manage).
+- **Mục «Bảo mật» của `manage.html`** (14/11, chưa deploy): `<style id="manage-bao-mat">` + class `bm-*`, hàm `bm*` / `readBaoMat` / `writeMaQuanLy` / `doiMatKhau`; mẫu duyệt `docs/mau/mau_manage_bao_mat_v4.html`. Kiểm: `tools/ql_giao_dien/e2e_manage_bao_mat.js`.
+- **Gấu Noel trong `manage.html`** (16/11, chưa deploy): mục «Gấu Noel» = tab Gấu của pos (thẻ `gau_noel_giangsinh.v4.js` `data-quan="manage"`, chỉ bản Giáng sinh; `navList()` / `GauNoel.manageView` / `manageMount`). Kiểm: `tools/gau_noel/e2e_manage_gau.js`.
 - **Tab Quản lý `pos.html` kiểu bento** (13/11, chưa deploy): một khối `<style id="pos-manager-bento">` + class `mgr-*`, mẫu `docs/mau/mau_quanly_tc33_bento_v3.html`; xanh `#006241` + đen, phông Inter. Giữ điểm neo file theo mùa: `mgr-tab-label`, `mgr-mob-tab-label`, `mgr-col-c`, `mgr-col-b-wrap`, `switchMgrTab`. Kiểm: `tools/ql_giao_dien/e2e_pos_manager_bento.js` (cần `TAILWIND_CSS`).
 
 ## Kế hoạch & tài liệu
 - **Đọc trước tiên: `docs/TRANG_THAI.md`** (bản hiện hành, việc còn mở, bản đồ tài liệu).
 - Tách posgieo thành `js/posgieo/*.vN.js`: `docs/KE_HOACH_TACH_POSGIEO_DA_CUA_HANG.md` — chỉ chuyển nguyên văn, ưu tiên luồng bán trơn tru.
-- Bản theo mùa: Giáng sinh đang chạy; Tết 2027 (`docs/LIXI_TET_2027.md`). Gấu Noel `gau_noel_giangsinh.v3.js` (chưa deploy: còn sửa tại chỗ được; sau deploy = v4; hướng dẫn gỡ + luật chơi: `docs/HUONG_DAN_GAU_NOEL.md`). Chế độ thử `docs/CHE_DO_THU.md` — app thật không bao giờ nạp `che_do_thu`.
+- Bản theo mùa: Giáng sinh đang chạy; Tết 2027 (`docs/LIXI_TET_2027.md`). Gấu Noel `gau_noel_giangsinh.v4.js` (16/11, CHƯA deploy — trên máy chủ v3 đang chạy thật; v4 phát theo doanh thu, tự nhận tiếp số đã phát của v3; còn sửa tại chỗ được, sau deploy = v5; luật v4 + hướng dẫn gỡ: `docs/HUONG_DAN_GAU_NOEL.md`). Chế độ thử `docs/CHE_DO_THU.md` — app thật không bao giờ nạp `che_do_thu`.
 - Giao diện quanlygieo: dáng theo manage, **giữ màu hồng `#E23A5D`** (`docs/GIAO_DIEN_QUANLY.md`).
 - CLAUDE.md đầy đủ cũ: `docs/luu_tru/CLAUDE_MD_DAY_DU_06-11-2026.md` — chỉ tra cứu.
 

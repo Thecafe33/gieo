@@ -123,7 +123,7 @@ chk(G.heSoKho(kho, G.chang('2026-11-23'), 'v45') === 0.7 && G.heSoKho(khoMoi(7),
 (() => {
   const fs = require('fs'), path = require('path'), R = path.join(__dirname, '..');
   const moi = fs.readdirSync(R).filter(f => /^gau_noel_giangsinh\.v\d+\.js$/.test(f)).sort((a, b) => +a.match(/v(\d+)/)[1] - +b.match(/v(\d+)/)[1]).pop();
-  const sai = ['pos.html', 'PosX.html', 'posgieo.html', 'kiosk.html', 'index_giangsinh.html'].filter(f => !fs.readFileSync(path.join(R, f), 'utf8').includes('<script src="' + moi + '"'));
+  const sai = ['pos.html', 'PosX.html', 'posgieo.html', 'kiosk.html', 'index_giangsinh.html', 'manage.html'].filter(f => !fs.readFileSync(path.join(R, f), 'utf8').includes('<script src="' + moi + '"'));
   chk(!sai.length, 'các app nạp bản mới nhất ' + moi + (sai.length ? ' — sai: ' + sai.join(', ') : ''));
 })();
 
