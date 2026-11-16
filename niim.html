@@ -141,6 +141,7 @@ input[type=range]{width:100%;accent-color:var(--ink)}
 .mm input{width:66px;background:#24242b;border:1.5px solid transparent;border-radius:14px;padding:8px 10px;color:#fff;text-align:center;font-weight:600;font-size:15px;outline:0}
 .mm input:focus{border-color:#fff}
 .mm span{color:#a9a8b3;font-size:13px}
+.row .mid small{line-height:1.35}
 .sum{background:#fff;color:var(--ink);border-radius:var(--r-lg);padding:18px 22px;margin-top:12px;position:relative;overflow:hidden}
 .sum .l1{display:flex;justify-content:space-between;align-items:center;font-size:14.5px;padding-bottom:12px;border-bottom:1px solid var(--line)}
 .sum .l1 b{font-size:17px;font-weight:600}
@@ -270,6 +271,13 @@ details[open] summary::after{transform:rotate(-135deg)}
           </div>
         </div>
 
+        <div class="row">
+          <div class="ava" style="background:var(--yellow)"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18M12 3l-3 3M12 3l3 3M12 21l-3-3M12 21l3-3M3 12h18M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3"/></svg></div>
+          <div class="mid"><b>Canh lề</b><small>Hình in thấp quá → tăng «Trên». Lệch trái → tăng «Ngang», lệch phải → số âm.</small>
+            <div class="mm"><span>Trên</span><input id="i-ly" inputmode="decimal" aria-label="Lề trên máy bỏ qua, mm"><span>Ngang</span><input id="i-lx" inputmode="text" aria-label="Đẩy ngang, mm"><span>mm</span></div>
+          </div>
+        </div>
+
         <div class="sum">
           <div class="l1"><span>Thời gian ước tính</span><b id="s-tg">≈ 5 giây</b></div>
           <div class="l2"><span>Sẽ in</span><b id="s-tong">1 tem</b></div>
@@ -390,7 +398,7 @@ var TEN_MAU = { ly: ['Tem', 'ly'], chu: ['Chữ', 'lớn'], anh: ['Ảnh', 'tự
 
 // ════════ Trạng thái (lưu lại giữa các lần mở) ════════
 var S = {
-  mau: 'ly', rong: 40, cao: 30, xoay: 0, doDam: 5, soBan: 1, loaiGiay: 1,
+  mau: 'ly', rong: 40, cao: 30, lechY: 4.5, lechX: 2, xoay: 0, doDam: 5, soBan: 1, loaiGiay: 1,
   ly: { quan: 'XOFA', don: '#012', mon: 'Cà phê sữa đá', tuy: 'Size L · Ít đá · 70% đường', ghi: 'Mang đi', gia: '35K', thu: '1/2', gio: true },
   chu: { nd: 'XOFA\nXin cảm ơn!', dam: true, khung: true },
   anh: { lap: false, cham: true, nguong: 128 }
@@ -594,10 +602,17 @@ function denTrang(ctx, w, h, nguong, cham) {
   return den;
 }
 
-// Dựng tem ra canvas đúng số điểm sẽ gửi cho máy in (rộng = ngang đầu in, cao = chiều giấy chạy).
-function veTem(dich) {
+// Vùng máy in với tới trên nhãn. Máy B1 (giấy không chip) bắt đầu in thấp hơn mép trên nhãn một đoạn (lechY)
+// và hình lệch ngang một đoạn (lechX > 0: máy in lệch trái nên phải đẩy hình sang phải).
+function khung() {
   var W = Math.round(S.rong * DPMM), H = Math.round(S.cao * DPMM);
-  var ngang = S.xoay % 180 === 0, w = ngang ? W : H, h = ngang ? H : W;
+  var oy = kep(Math.round(S.lechY * DPMM), 0, H - 80), ox = kep(Math.round(S.lechX * DPMM), -(W - 80), W - 80);
+  return { W: W, H: H, ox: ox, oy: oy, dw: W - Math.abs(ox), dh: H - oy };
+}
+// Dựng tem ra canvas đúng số điểm sẽ gửi cho máy in (rộng = ngang đầu in, cao = chiều giấy chạy).
+// Dòng 0 của canvas rơi vào vị trí lechY trên nhãn; cột c rơi vào vị trí c − lechX.
+function veTem() {
+  var k = khung(), ngang = S.xoay % 180 === 0, w = ngang ? k.dw : k.dh, h = ngang ? k.dh : k.dw;
   var tam = document.createElement('canvas'); tam.width = w; tam.height = h;
   var c = tam.getContext('2d', { willReadFrequently: true });
   c.fillStyle = '#fff'; c.fillRect(0, 0, w, h);
@@ -605,23 +620,35 @@ function veTem(dich) {
   var laAnh = S.mau === 'anh' && anhNguon;
   denTrang(c, w, h, laAnh ? S.anh.nguong : 150, laAnh && S.anh.cham);
 
-  dich = dich || document.createElement('canvas');
-  dich.width = W; dich.height = H;
+  var dich = document.createElement('canvas'); dich.width = k.W; dich.height = k.dh;
   var o = dich.getContext('2d'); o.imageSmoothingEnabled = false;
-  o.fillStyle = '#fff'; o.fillRect(0, 0, W, H);
-  o.save(); o.translate(W / 2, H / 2); o.rotate(S.xoay * Math.PI / 180); o.drawImage(tam, -w / 2, -h / 2); o.restore();
+  o.fillStyle = '#fff'; o.fillRect(0, 0, k.W, k.dh);
+  o.save(); o.translate(Math.max(0, k.ox) + k.dw / 2, k.dh / 2); o.rotate(S.xoay * Math.PI / 180); o.drawImage(tam, -w / 2, -h / 2); o.restore();
   return dich;
+}
+// Xem trước = cả tờ nhãn thật: hình nằm đúng chỗ sẽ in ra, phần máy không với tới tô xám nhạt.
+function veXemTruoc() {
+  var k = khung(), gui = veTem();
+  cv.width = k.W; cv.height = k.H;
+  var o = cv.getContext('2d'); o.imageSmoothingEnabled = false;
+  o.fillStyle = '#fff'; o.fillRect(0, 0, k.W, k.H);
+  o.drawImage(gui, -k.ox, k.oy);
+  o.fillStyle = '#ececf0';
+  if (k.oy > 0) o.fillRect(0, 0, k.W, k.oy);
+  if (k.ox > 0) o.fillRect(k.dw, 0, k.ox, k.H);
+  if (k.ox < 0) o.fillRect(0, 0, -k.ox, k.H);
+  return gui;
 }
 
 // ════════ Giao diện ════════
 function tgUocTinh() { return (coChip === true ? 2 : 5) * S.soBan; }
 function capNhat() {
-  veTem(cv);
+  var gui = veXemTruoc();
   var W = cv.width, H = cv.height;
   $('paper').style.width = Math.round(kep(W * 0.82, 150, 300)) + 'px';
   $('hero').style.setProperty('--hero', MAU_NEN[S.mau]);
   var t = $('hero-ten'); t.textContent = ''; t.appendChild(document.createTextNode(TEN_MAU[S.mau][0])); t.appendChild(document.createElement('br')); t.appendChild(document.createTextNode(TEN_MAU[S.mau][1]));
-  $('hero-diem').textContent = W + ' × ' + H + ' điểm';
+  $('hero-diem').textContent = 'In ' + gui.width + ' × ' + gui.height + ' điểm';
   $('hero-kho').textContent = S.rong + ' × ' + S.cao + ' mm';
   $('hero-huong').textContent = 'Mép trên ra trước · xoay ' + S.xoay + '°';
   $('v-doDam').textContent = S.doDam; $('p-doDam').textContent = 'Mức ' + S.doDam;
@@ -655,13 +682,15 @@ $('seg-giay').addEventListener('click', function (e) { var b = e.target.closest(
   });
 });
 $('btn-xoay').addEventListener('click', function () { S.xoay = (S.xoay + 90) % 360; veLai(); });
-$('i-rong').value = S.rong; $('i-cao').value = S.cao;
+$('i-rong').value = S.rong; $('i-cao').value = S.cao; $('i-ly').value = S.lechY; $('i-lx').value = S.lechX;
 function doiKho() {
   S.rong = kep(Math.round(soMm($('i-rong').value, 40) * 10) / 10, 10, DAU_IN_MM);
   S.cao = kep(Math.round(soMm($('i-cao').value, 30) * 10) / 10, 10, 200);
-  $('i-rong').value = S.rong; $('i-cao').value = S.cao; veLai();
+  S.lechY = kep(Math.round(soMm($('i-ly').value, 0) * 10) / 10, 0, 15);
+  S.lechX = kep(Math.round(soMm($('i-lx').value, 0) * 10) / 10, -10, 10);
+  $('i-rong').value = S.rong; $('i-cao').value = S.cao; $('i-ly').value = S.lechY; $('i-lx').value = S.lechX; veLai();
 }
-$('i-rong').addEventListener('change', doiKho); $('i-cao').addEventListener('change', doiKho);
+['i-rong', 'i-cao', 'i-ly', 'i-lx'].forEach(function (id) { $(id).addEventListener('change', doiKho); });
 $('anh-file').addEventListener('change', function () {
   var f = this.files && this.files[0]; if (!f) return;
   var url = URL.createObjectURL(f), im = new Image();
@@ -788,7 +817,7 @@ async function inTem() {
   try {
     var anh = L.ImageEncoder.encodeCanvas(veTem(), L.PageColorType.SingleColor, 'top');
     var kieu = c.getPrintTaskType() || 'B1';
-    log('In ' + soBan + ' tem · ' + anh.cols + '×' + anh.rows + ' điểm · đậm ' + S.doDam + ' · giấy ' + S.loaiGiay + ' · kiểu ' + kieu);
+    log('In ' + soBan + ' tem · ' + anh.cols + '×' + anh.rows + ' điểm · lề trên ' + S.lechY + ' mm, ngang ' + S.lechX + ' mm · đậm ' + S.doDam + ' · giấy ' + S.loaiGiay + ' · kiểu ' + kieu);
     task = c.protocol.newPrintTask(kieu, {
       totalPages: soBan, density: S.doDam, labelType: S.loaiGiay,
       statusPollIntervalMs: 200, statusTimeoutMs: 10000, pageTimeoutMs: 15000
@@ -821,7 +850,7 @@ if (document.fonts && document.fonts.load) {
   Promise.all(['500', '600', '700', '800'].map(function (w) { return document.fonts.load(w + ' 24px "Be Vietnam Pro"', 'Cà phê sữa đá'); }))
     .then(capNhat, function () {});
 }
-setInterval(function () { if (S.mau === 'ly' && S.ly.gio && !dangBan) veTem(cv); }, 30000);
+setInterval(function () { if (S.mau === 'ly' && S.ly.gio && !dangBan) veXemTruoc(); }, 30000);
 if (!navigator.bluetooth) {
   $('st-2').textContent = 'Trình duyệt này không có Bluetooth — dùng Chrome';
   log('Trình duyệt không hỗ trợ Web Bluetooth. Cần Chrome trên Android hoặc máy tính, trang chạy trên https.', 'e');
