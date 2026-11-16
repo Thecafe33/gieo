@@ -1,3 +1,11 @@
+# 16/11 — Quản lý Gieo: sidebar gọn + bộ deploy dùng quanlygieo2 làm `quanlygieo.html` (chủ dự án duyệt 16/11) — CHƯA deploy
+
+[Kế hoạch](KE_HOACH_THAY_QUANLYGIEO_VA_GON_SIDEBAR_16-11.md). Gói giao: `giao_file/dot_16-11_quanly_gon_sidebar/`.
+- **Sidebar** (`quanlygieo.html`, chỉ `NAV_SECTIONS` + `renderSidebarNav`): 51 mục → 20 mục + nhóm gập «Ít dùng» (14 mục). Báo cáo một dòng (thanh tab báo cáo sẵn có), Kho ba dòng (thanh tab Kho sẵn có). Không đổi giao diện / nội dung màn. Bỏ khỏi menu: «Mô phỏng», «Ghi chú ngày»; giữ «Dọn dữ liệu», «Tra cứu».
+- **Bước A**: `tools/tao_bo_deploy.js` — trong `ban_deploy/*`, `quanlygieo.html` = nội dung `quanlygieo2.html`; bản không lớp phủ = `quanlygieo_cu.html` (quay lui). File gốc ở gốc repo không đổi vai — vẫn sửa `quanlygieo.html`, quanlygieo2 vẫn là file sinh.
+- **Còn mở**: bước B (nhập lớp phủ `tools/automation/ui*.js|css` vào file gốc, bỏ `build_page.js`), bước C (gỡ tên `quanlygieo2.html`). Deploy gói này cần posgieo v22 trên máy chủ (cùng engine).
+- Kiểm: `e2e_khung.js` 68/68; `sinh_lai_tat_ca.sh` giữ mốc (6 FAIL test 8, 11 + `gieo_automation_queue` hỏng sẵn).
+
 # 14/11 — Bảo mật: duyệt máy + mã quản lý + đổi mật khẩu ở manage — ĐỢT 1 XONG, CHƯA deploy
 
 [Kế hoạch + nhật ký](KE_HOACH_BAO_MAT_BACKEND_14-11.md). Chủ dự án: bảo mật chưa phải ưu tiên — **làm sẵn, không bắt buộc gì cho tới khi tự đổi mật khẩu**; khoá Google Sheets trong `pos.html` giữ nguyên; **kiosk đứng ngoài** (giữ đăng nhập cũ).

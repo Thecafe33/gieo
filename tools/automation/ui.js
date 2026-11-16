@@ -237,4 +237,4 @@ async function autoControlCenter(){
   +'<div class="wdg-body"><p class="ax-sub">'+e(s2)+'</p><div class="ax-actions"><button class="btn" onclick="Engine2QL.open()">Xem kết quả</button><button class="btn outline" onclick="Engine2QL.settings()">Thiết lập</button></div></div></section>';
 }
 // Đặt NGAY DƯỚI «Hôm nay · Sức khoẻ quán» (chủ quán 23/10: dùng nhiều nhất, không phải cuộn tìm).
-if(typeof NAV_SECTIONS!=='undefined'){const g=NAV_SECTIONS.find(x=>x.items.some(i=>i.key==='today'));if(g&&!g.items.some(i=>i.key==='auto')){const at=g.items.findIndex(i=>i.key==='today')+1;g.items.splice(at,0,{key:'auto',ic:'sliders',label:'Tự động & Engine 2',go:'autoControlCenter()'});}}
+if(typeof NAV_SECTIONS!=='undefined'){const g=NAV_SECTIONS.find(x=>x.items.some(i=>i.key==='today'));if(g&&!g.items.some(i=>i.key==='auto')){const at=g.items.findIndex(i=>i.key==='today')+1;g.items.splice(at,0,{key:'auto',ic:'sliders',label:'Tự động & Engine 2',go:'autoControlCenter()'});if(typeof renderSidebarNav==='function')renderSidebarNav();}}

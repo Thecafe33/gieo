@@ -1,6 +1,8 @@
 # Kế hoạch: thay `quanlygieo.html` bằng `quanlygieo2.html` + tinh gọn sidebar (16/11/2026)
 
-**Trạng thái: ĐỀ XUẤT — chờ chủ dự án duyệt. Chưa sửa file gốc nào.**
+**Trạng thái (16/11, lượt 2): chủ dự án ĐÃ DUYỆT. Đã làm: gọn sidebar (mục 3) + bước A (mục 2) — CHƯA deploy. Còn lại: bước B, C.**
+Chốt của chủ dự án: giữ tên `quanlygieo.html`; giữ «Dọn dữ liệu»; quanlygieo2 đã chạy ổn và là bản mặc định cùng Unit Engine 2.
+Kết quả khác đề xuất ban đầu: **«Tra cứu» KHÔNG bỏ** — kiểm lại thì nó truy tem ↔ bill ↔ lô (không trùng ô tìm ở Tem NL) và `goContainers('trace')` dẫn tới nó; vẫn nằm trong thanh tab Kho · Tem, lô & sổ. **Đã bỏ khỏi menu: «Mô phỏng», «Ghi chú ngày»** (mã vẽ màn còn trong file, không còn lối vào; dữ liệu `daily_ops_gieogieo` không đụng). Nhóm «Ít dùng» còn 14 mục. Gói giao: `giao_file/dot_16-11_quanly_gon_sidebar/`.
 Ràng buộc chủ dự án nêu 16/11: **không đổi giao diện** (dáng, màu, tên mục, nội dung từng màn giữ nguyên) — chỉ tinh gọn sidebar; mục ít dùng / không dùng thì gom hoặc đề xuất bỏ.
 
 Ảnh so sánh (dựng chính `quanlygieo2.html` với Firebase giả, chỉ đổi danh sách mục lúc chạy): `docs/mau/anh/sidebar_ql2_so_sanh.png` (trước · sau · sau khi mở nhóm «Ít dùng»), `docs/mau/anh/sidebar_ql2_sau_toan_man.png` (toàn màn 1366×820).

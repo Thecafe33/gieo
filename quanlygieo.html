@@ -12685,7 +12685,7 @@ function renderAlerts(alerts){
 // ============================================================
 // [GỘP MÀN] Landing là 'today' — nay chính nó đã bao gồm phần Sức khoẻ quán.
 let curScreen = 'today';
-let curEntryTab = 'ops';
+let curEntryTab = 'exp';   // [GỌN SIDEBAR 16/11] 'ops' (Ghi chú ngày) đã bỏ khỏi menu
 // [BỎ] ENTRY_GROUPS / entryGroupOfTab — cấu trúc nhóm 2 tầng của thanh chip
 // cũ ở màn Nhập liệu. Mọi mục đã chuyển thẳng lên sidebar (NAV_SECTIONS),
 // nên khối này không còn ai dùng; giữ lại chỉ tổ làm người đọc sau tưởng
@@ -12901,58 +12901,45 @@ document.addEventListener('DOMContentLoaded',uiWidgetsStart);
 // [WIDGET-ROLLOUT:END]
 
 const NAV_SECTIONS = [
-  // [GỘP MÀN] "Sức khoẻ quán" và "Hôm nay" nay là MỘT màn: mở ra thấy luôn việc cần
-  // xử lý và tình trạng của ngày, không phải nhảy qua nhảy lại hai chỗ.
+  // [GỌN SIDEBAR 16/11] Chủ dự án duyệt: sidebar chỉ còn một dòng cho mỗi cụm ĐÃ CÓ thanh tab ở đầu màn
+  // (thanh tab báo cáo renderReportSubNav, thanh tab Kho khoSubNavHtml), mục ít dùng gom vào nhóm gập
+  // «Ít dùng». Không màn nào đổi nội dung. Ô tìm (Ctrl K) vẫn ra MỌI mục.
+  //   one:'Tên dòng'  → sidebar vẽ CẢ nhóm thành một dòng (bấm = mở mục đầu; sáng khi đứng ở bất kỳ mục nào
+  //                      của nhóm). items vẫn đủ để thanh tab, NAV_LABEL, NAV_GROUP đọc như cũ.
+  //   head            → nhãn nhóm in trên sidebar thay cho group ('' = không in). group vẫn là dòng nhỏ
+  //                      trên tiêu đề màn.
+  //   collapsible     → nhóm gập (lessNavOpen).
+  // Đã bỏ khỏi app 16/11 (chủ dự án duyệt): «Mô phỏng», «Ghi chú ngày».
+  // [GỘP MÀN] "Sức khoẻ quán" và "Hôm nay" là MỘT màn.
   { items:[
     {key:'today',    ic:'stethoscope', label:'Hôm nay · Sức khoẻ quán', go:"switchScreen('today')"},
-    // [MỚI] Màn thứ hai đi cùng "Sức khoẻ quán": gộp 6 mục vận hành hằng ngày
-    // (nguyên liệu, tiền mặt, checklist ca, BTP, hàng đang mở, lịch sử bill) —
-    // trước đây nằm rải rác trong nhánh Kho/Vận hành của sidebar, phải nhớ tên
-    // mục mới mò ra. Chủ quán chỉ cần nhớ 2 màn "Hôm nay" là đủ xem mỗi ngày.
     {key:'todayops', ic:'clipboard',   label:'Hôm nay · Vận hành',      go:"switchScreen('todayops')"},
-    // [MỚI] Màn thứ ba: SỨC KHOẺ NGUYÊN LIỆU & BÁN THÀNH PHẨM — nối hao hụt, chi phí,
-    // COGS và LỆCH ĐỊNH LƯỢNG THEO TỪNG LÔ (mới, xem computeLechDinhLuongLo) vào một
-    // chỗ. Khác 2 màn "Hôm nay": đây là màn ĐỌC LẠI theo kỳ (thường cuối tháng), không
-    // phải xem hằng ngày, nên tách riêng thay vì nhét vào Vận hành.
-    {key:'nlbtp', ic:'detective',    label:'Sức khoẻ NL_BTP',        go:"switchScreen('nlbtp')"},
   ]},
-  { group:'Báo cáo', items:[
+  { group:'Báo cáo', one:'Báo cáo', items:[
     {key:'health', ic:'pulse',    label:'Sức khỏe tài chính', go:"switchScreen('health')"},
     {key:'report', ic:'chart',    label:'Báo cáo kỳ',         go:"switchScreen('report')"},
     {key:'mix',    ic:'clipboard', label:'Phân tích bán hàng', go:"switchScreen('mix')"},
     {key:'customer', ic:'users',   label:'Khách hàng',          go:"switchScreen('customer')"},
-    // [MỚI] Tổng kết tháng — gộp lại những gì "đa phần đã có hàm sẵn" (lãi/lỗ,
-    // bán hàng, kho, chấm công) thành MỘT màn xem theo tháng, để đánh giá + trả
-    // lương cuối tháng không phải nhảy qua 5-6 tab rồi tự cộng bằng tay.
     {key:'thangket', ic:'calendar', label:'Tổng kết tháng', go:"switchScreen('thangket')"},
   ]},
+  // Màn ĐỌC LẠI theo kỳ: hao hụt, chi phí, COGS, lệch định lượng theo lô.
+  { group:'Báo cáo', head:'', items:[
+    {key:'nlbtp', ic:'detective',    label:'Sức khoẻ NL_BTP',        go:"switchScreen('nlbtp')"},
+  ]},
   { group:'Vận hành', items:[
-    {key:'entry:ops',  ic:'note',    label:'Ghi chú ngày',  go:"goEntry('ops')"},
     {key:'entry:exp',  ic:'cashout', label:'Chi phí',       go:"goEntry('exp')"},
     {key:'entry:cash', ic:'coins',   label:'Tiền mặt',      go:"goEntry('cash')"},
     {key:'bills',      ic:'receipt', label:'Lịch sử bill',  go:"goBills()"},
-    {key:'kho:checklist', ic:'check', label:'Checklist ca',  go:"goKho('checklist')"},
   ]},
-  // Kho — gập/mở. Chia theo NHỊP công việc chứ không theo loại dữ liệu:
-  //   Cần xử lý  → việc đang chờ ngay hôm nay (màn mặc định khi vào Kho)
-  //   Hàng hoá   → danh mục, sửa thỉnh thoảng
-  //   Hoạt động  → việc lặp lại + tra cứu
-  //   Cài đặt    → đặt một lần rồi quên, nên đẩy xuống cuối
-  // Cách chia cũ ("Danh mục / Nhập hàng / Vận hành / Lịch sử") trộn cấu hình một
-  // lần (Lý do hao hụt, Checklist ca) chung với việc hằng ngày (Refill, Kiểm kê),
-  // và để "Nhập hàng loạt" — vốn là nhập DANH MỤC từ Excel — trong nhóm "Nhập
-  // hàng", ai đọc cũng tưởng là đưa hàng vào kho.
-  // [GỘP] Kho và Kho 2.0 giờ là MỘT khối "Kho" (3 nhóm liền nhau). Màn cũ (renderKho*) và màn Kho 2.0
-  // (renderKho2*) vẫn là hai bộ máy vẽ riêng, chỉ lối vào là chung. Mỗi nhóm con
-  // (sub) cũng là thanh tab trên đầu màn — xem khoSubNavHtml().
-  // Không gập: các mục Kho dùng hằng ngày nên phải bấm được ngay (Elio, 24/09).
-  { group:'Kho · Hằng ngày', kho:true, items:[
+  // Kho — ba nhóm kho:true, mỗi nhóm cũng là thanh tab trên đầu màn (khoSubNavHtml). Màn cũ (renderKho*)
+  // và màn Kho 2.0 (renderKho2*) vẫn là hai bộ máy vẽ riêng, chỉ lối vào là chung.
+  { group:'Kho · Hằng ngày', head:'Kho', one:'Kho · Hằng ngày', kho:true, items:[
     {key:'kho2:dash',        ic:'pulse',     label:'Tổng quan',       go:"goKho2('dash')"},
     {key:'kho:po',           ic:'download',  label:'Đặt & nhận hàng', go:"goKho('po')"},
     {key:'kho:stockcount',   ic:'clipboard', label:'Kiểm kê',         go:"goKho('stockcount')"},
     {key:'kho:refill',       ic:'inbox',     label:'Refill & vị trí', go:"goKho('refill')"},
   ]},
-  { group:'Kho · Tem, lô & sổ', kho:true, items:[
+  { group:'Kho · Tem, lô & sổ', head:'', one:'Kho · Tem, lô & sổ', kho:true, items:[
     {key:'kho2:items',       ic:'receipt',   label:'Tem NL',          go:"goKho2('items')"},
     {key:'kho2:prep',        ic:'flame',     label:'Lô BTP',          go:"goKho2('prep')"},
     {key:'kho2:search',      ic:'search',    label:'Tra cứu',         go:"goKho2('search')"},
@@ -12960,53 +12947,45 @@ const NAV_SECTIONS = [
     {key:'kho:solech',       ic:'alert',     label:'Sổ lệch tem',     go:"goKho('solech')"},
     {key:'kho:btpam',        ic:'flame',     label:'Đối chiếu BTP âm', go:"goKho('btpam')"},
   ]},
-  { group:'Kho · Danh mục', kho:true, items:[
+  { group:'Kho · Danh mục', head:'', one:'Kho · Danh mục', kho:true, items:[
     {key:'kho:items',        ic:'package',   label:'Nguyên liệu',     go:"goKho('items')"},
     {key:'kho:prep',         ic:'note',      label:'Bán thành phẩm',  go:"goKho('prep')"},
     {key:'kho:vessels',      ic:'sliders',   label:'Dụng cụ đựng',    go:"goKho('vessels')"},
     {key:'kho:wastereasons', ic:'alert',     label:'Lý do hao hụt',   go:"goKho('wastereasons')"},
   ]},
-  // [GOM MÀN] Bốn mục này TRƯỚC ĐÂY nằm rải: hai cái trong nhánh Kho (vốn đã 16
-  // mục), hai cái trong Cấu hình. Nhưng chúng không phải việc kho hằng ngày cũng
-  // không phải cấu hình đặt-một-lần — chúng là việc ĐỌC SỐ: đối chiếu, dự báo,
-  // trích xuất. Gom lại một chỗ để nhánh Kho còn đúng phần vận hành hàng hoá.
-  { group:'Phân tích & dữ liệu', items:[
-    {key:'kho:duty',          ic:'detective', label:'Tóm tắt ngày & vụ lệch', go:"goKho('duty')",    sub:'NL/BTP đi đâu, ai chịu'},
-    {key:'kho:lechkho',       ic:'detective', label:'Lệch kho & định lượng', go:"goKho('lechkho')",  sub:'Sau mỗi lần kiểm kê'},
-    {key:'kho:dubao',         ic:'chart',     label:'Dự báo & số mẻ',        go:"goKho('dubao')",    sub:'Trước khi nấu'},
-    {key:'entry:ngaydacbiet', ic:'calendar',  label:'Ngày đặc biệt',         go:"goEntry('ngaydacbiet')", sub:'Khai trước ngày lễ'},
-    {key:'entry:export',      ic:'download',  label:'Trích xuất dữ liệu',    go:"goEntry('export')", sub:'Gửi Claude phân tích'},
+  { group:'Kho', head:'', items:[
+    {key:'kho:duty',          ic:'detective', label:'Tóm tắt ngày & vụ lệch', go:"goKho('duty')"},
   ]},
   { group:'Nhân sự', items:[
     {key:'entry:nv',       ic:'users',     label:'Nhân viên',      go:"goEntry('nv')"},
     {key:'entry:lich',     ic:'calendar',  label:'Lịch làm việc',  go:"goEntry('lich')"},
     {key:'entry:chamcong', ic:'clock',     label:'Chấm công',      go:"goEntry('chamcong')"},
     {key:'entry:luong',    ic:'coins',     label:'Lương',          go:"goEntry('luong')"},
-    {key:'entry:nhacnho',  ic:'signature', label:'Nhắc nhở',       go:"goEntry('nhacnho')"},
   ]},
-  { group:'Cấu hình', items:[
-    {key:'entry:asset',  ic:'package',  label:'Tài sản',   go:"goEntry('asset')"},
-    {key:'entry:target', ic:'settings', label:'Mục tiêu',  go:"goEntry('target')"},
-    {key:'sim',          ic:'sliders',  label:'Mô phỏng',  go:"switchScreen('sim')"},
-    {key:'entry:dondep', ic:'trash',    label:'Dọn dữ liệu', go:"goEntry('dondep')"},
-    {key:'entry:stores', ic:'store',    label:'Cửa hàng',    go:"goEntry('stores')", sub:'Mã đăng nhập POS · đồng bộ danh mục'},
-  ]},
-  // [BÊ TỪ POS] Hai màn này trước nằm trong app POS — chuyển sang đây vì sửa giá
-  // và cấu hình khuyến mãi là việc của chủ quán, không phải của nhân viên bán hàng.
-  // [SỬA] "Định mức" mở ra là DANH SÁCH MÓN TRONG MENU để khai công thức, và
-  // "GOGS Món" là giá vốn của món — cả hai là thuộc tính của MÓN, không phải của
-  // kho. Để trong nhóm Kho thì sửa món phải nhảy qua nhảy lại hai nhóm.
+  // [BÊ TỪ POS] Sửa giá và cấu hình khuyến mãi là việc của chủ quán. "Định mức" và "GOGS Món" là thuộc
+  // tính của MÓN nên đứng ở đây chứ không ở Kho.
   { group:'Menu & Khuyến mãi', items:[
     {key:'mn',           ic:'clipboard', label:'Quản lý Menu', go:"switchScreen('mn')"},
     {key:'kho:recipe',   ic:'note',      label:'Định mức món', go:"goKho('recipe')"},
     {key:'entry:cogs',   ic:'coins',     label:'GOGS Món',     go:"goEntry('cogs')"},
-    {key:'kho:toppingcogs', ic:'coins',  label:'GOGS Topping', go:"goKho('toppingcogs')"},
-    {key:'kho:packaging',   ic:'package',label:'Bao bì',       go:"goKho('packaging')"},
     {key:'tg',           ic:'coins',     label:'Khuyến mãi',   go:"switchScreen('tg')"},
-    {key:'assist',       ic:'robot',     label:'Trợ lý bán hàng', go:"switchScreen('assist')"},
   ]},
-  { group:'Kiểm toán', items:[
-    {key:'entry:audit', ic:'detective', label:'Kiểm toán', go:"goEntry('audit')"},
+  // Mục ít mở (cấu hình đặt một lần, công cụ, màn đọc số thỉnh thoảng) — gập, mặc định đóng.
+  { group:'Ít dùng', collapsible:true, ic:'settings', items:[
+    {key:'kho:checklist',     ic:'check',     label:'Checklist ca',          go:"goKho('checklist')"},
+    {key:'entry:nhacnho',     ic:'signature', label:'Nhắc nhở',              go:"goEntry('nhacnho')"},
+    {key:'kho:lechkho',       ic:'detective', label:'Lệch kho & định lượng', go:"goKho('lechkho')"},
+    {key:'kho:dubao',         ic:'chart',     label:'Dự báo & số mẻ',        go:"goKho('dubao')"},
+    {key:'entry:ngaydacbiet', ic:'calendar',  label:'Ngày đặc biệt',         go:"goEntry('ngaydacbiet')"},
+    {key:'entry:export',      ic:'download',  label:'Trích xuất dữ liệu',    go:"goEntry('export')"},
+    {key:'kho:toppingcogs',   ic:'coins',     label:'GOGS Topping',          go:"goKho('toppingcogs')"},
+    {key:'kho:packaging',     ic:'package',   label:'Bao bì',                go:"goKho('packaging')"},
+    {key:'assist',            ic:'robot',     label:'Trợ lý bán hàng',       go:"switchScreen('assist')"},
+    {key:'entry:asset',       ic:'package',   label:'Tài sản',               go:"goEntry('asset')"},
+    {key:'entry:target',      ic:'settings',  label:'Mục tiêu',              go:"goEntry('target')"},
+    {key:'entry:stores',      ic:'store',     label:'Cửa hàng',              go:"goEntry('stores')"},
+    {key:'entry:dondep',      ic:'trash',     label:'Dọn dữ liệu',           go:"goEntry('dondep')"},
+    {key:'entry:audit',       ic:'detective', label:'Kiểm toán',             go:"goEntry('audit')"},
   ]},
 ];
 
@@ -13063,6 +13042,13 @@ function khoSubNavHtml(curKey){
   const g = (NAV_SECTIONS.find(x=>x.kho && x.items.some(it=>it.key===curKey))||{}).items;
   if(!g) return '';
   return `<div class="k2-nav">${g.map(it=>`<button class="${it.key===curKey?'active':''}" onclick="${it.go}">${it.label}</button>`).join('')}</div>`;
+}
+// [GỌN SIDEBAR 16/11] Nhóm gập «Ít dùng» — gập/mở là quyền của người dùng, mặc định đóng.
+let lessNavOpen = false;
+function toggleLessNav(ev){
+  if(ev) ev.stopPropagation();
+  lessNavOpen = !lessNavOpen;
+  renderSidebarNav();
 }
 function toggleKhoNav(ev){
   if(ev) ev.stopPropagation();
@@ -13137,13 +13123,11 @@ function renderSidebarNav(){
   if(!nav) return;
   renderBottomNav();
   const cur = currentNavKey();
-  const inKho = KHO_NAV_KEYS.has(cur);
   const q = noAccent(navQuery);
-  const khoExpanded = q ? true : khoNavOpen;   // đang tìm kiếm thì luôn mở để thấy kết quả
   const match = it => !q || noAccent(it.label).includes(q);
 
-  const itemHtml = (it, indent)=>`
-    <button class="sidebar-item${indent?' sub':''} ${cur===it.key?'active':''}" onclick="${it.go}">
+  const itemHtml = (it, indent, on)=>`
+    <button class="sidebar-item${indent?' sub':''} ${(on||cur===it.key)?'active':''}" onclick="${it.go}">
       ${it.ic ? `<span class="sb-ic tile" style="--tile:${SB_TILE[it.ic]||'#8E8E93'}">${ic(it.ic,18)}</span>` : ''}<span>${it.label}</span>
       ${it.key==='today' && STORE_HEALTH_ISSUE_COUNT>0 ? '<span class="sb-dot"></span>' : ''}
     </button>`;
@@ -13153,25 +13137,27 @@ function renderSidebarNav(){
     const items = sec.items.filter(match);
     if(!items.length) return '';
     found += items.length;
+    const here = sec.items.some(it=>it.key===cur);
+    // Đang tìm: vẽ phẳng mọi mục khớp, kèm tên nhóm thật.
+    if(q) return `${sec.group ? `<div class="sidebar-group-label">${sec.group}</div>` : ''}${items.map(it=>itemHtml(it,false)).join('')}`;
+    const label = ('head' in sec) ? sec.head : sec.group;
+    const labelHtml = label ? `<div class="sidebar-group-label">${label}</div>` : '';
     if(sec.collapsible){
-      // 18 mục con của Kho trước đây đổ thẳng ra thành danh sách phẳng, lại thụt
-      // lề ÍT HƠN mục cha (mục cha có icon nên chữ bắt đầu ở 46px, mục con chỉ
-      // 38px) → nhìn như các mục con còn cao cấp hơn cả nhóm cha. Giờ bọc trong
-      // .sidebar-subtree có đường dẫn dọc, và nhãn phân nhóm con nằm đúng trong
-      // đường dẫn đó nên thấy rõ 3 tầng: Kho › Danh mục › Nguyên liệu.
+      // Nhóm gập: đầu nhóm + .sidebar-subtree có đường dẫn dọc. Đang đứng trong nhóm mà nhóm đóng thì đầu
+      // nhóm sáng + chấm «đang ở đây».
       return `
-        <button class="sidebar-item sidebar-head ${inKho && !khoExpanded ? 'active' : ''}"
-                onclick="toggleKhoNav(event)" aria-expanded="${khoExpanded}">
-          <span class="sb-ic">${ic('package',18)}</span><span>${sec.group}</span>
-          ${(inKho && !khoExpanded) ? '<span class="sb-here"></span>' : ''}
-          <span class="sb-caret">${ic(khoExpanded?'chevronUp':'chevronDown',16)}</span>
+        <button class="sidebar-item sidebar-head ${here && !lessNavOpen ? 'active' : ''}"
+                onclick="toggleLessNav(event)" aria-expanded="${lessNavOpen}">
+          <span class="sb-ic">${ic(sec.ic||'package',18)}</span><span>${sec.group}</span>
+          ${(here && !lessNavOpen) ? '<span class="sb-here"></span>' : ''}
+          <span class="sb-caret">${ic(lessNavOpen?'chevronUp':'chevronDown',16)}</span>
         </button>
-        ${khoExpanded ? `<div class="sidebar-subtree">${items.map(it=>`
-          ${(!q && it.sub) ? `<div class="sidebar-sub-label">${it.sub}</div>` : ''}
-          ${itemHtml(it, true)}`).join('')}</div>` : ''}`;
+        ${lessNavOpen ? `<div class="sidebar-subtree">${items.map(it=>itemHtml(it, true)).join('')}</div>` : ''}`;
     }
+    // Cả nhóm thành MỘT dòng: màn con chuyển bằng thanh tab sẵn có ở đầu màn.
+    if(sec.one) return labelHtml + itemHtml(Object.assign({}, sec.items[0], {label:sec.one}), false, here);
     return `
-      ${sec.group ? `<div class="sidebar-group-label">${sec.group}</div>` : ''}
+      ${labelHtml}
       ${items.map(it=>itemHtml(it,false)).join('')}`;
   }).join('');
   if(!found) nav.innerHTML = `<div class="nav-empty">Không có mục nào khớp “${escapeHtmlAttr(navQuery)}”</div>`;

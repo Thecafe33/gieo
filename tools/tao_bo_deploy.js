@@ -15,7 +15,10 @@ const rd = f => fs.readFileSync(path.join(ROOT, f), 'utf8');
 const giu = f => () => rd(f), go = f => () => boGauNoel(rd(f));
 
 // tên trong bộ → cách lấy nội dung
-const CHUNG = { 'quanlygieo2.html': giu('quanlygieo2.html'), 'kiem_toan_kho.html': giu('kiem_toan_kho.html'), 'quanlygieo.html': giu('quanlygieo.html'), 'quanlygieo_thu.html': giu('quanlygieo_thu.html') };
+// [BƯỚC A 16/11 — docs/KE_HOACH_THAY_QUANLYGIEO_VA_GON_SIDEBAR_16-11.md] Chủ dự án chốt quanlygieo2 là bản mặc định:
+// trong BỘ DEPLOY, quanlygieo.html = nội dung quanlygieo2 (có Tự động & Engine 2). Bản không lớp phủ giữ thêm một kỳ
+// dưới tên quanlygieo_cu.html để quay lui (chép đè lại vào quanlygieo.html). File gốc ở gốc repo KHÔNG đổi vai.
+const CHUNG = { 'quanlygieo2.html': giu('quanlygieo2.html'), 'kiem_toan_kho.html': giu('kiem_toan_kho.html'), 'quanlygieo.html': giu('quanlygieo2.html'), 'quanlygieo_cu.html': giu('quanlygieo.html'), 'quanlygieo_thu.html': giu('quanlygieo_thu.html') };
 const BO = {
   thuong: Object.assign({}, CHUNG, {
     'pos.html': go('pos.html'), 'PosX.html': go('PosX.html'), 'posgieo.html': go('posgieo.html'), 'posgieo_thu.html': go('posgieo_thu.html'),

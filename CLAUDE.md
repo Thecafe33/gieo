@@ -44,6 +44,7 @@
 - Tách posgieo thành `js/posgieo/*.vN.js`: `docs/KE_HOACH_TACH_POSGIEO_DA_CUA_HANG.md` — chỉ chuyển nguyên văn, ưu tiên luồng bán trơn tru.
 - Bản theo mùa: Giáng sinh đang chạy; Tết 2027 (`docs/LIXI_TET_2027.md`). Gấu Noel `gau_noel_giangsinh.v4.js` (16/11, CHƯA deploy — trên máy chủ v3 đang chạy thật; v4 phát theo doanh thu, tự nhận tiếp số đã phát của v3; còn sửa tại chỗ được, sau deploy = v5; luật v4 + hướng dẫn gỡ: `docs/HUONG_DAN_GAU_NOEL.md`). Chế độ thử `docs/CHE_DO_THU.md` — app thật không bao giờ nạp `che_do_thu`.
 - Giao diện quanlygieo: dáng theo manage, **giữ màu hồng `#E23A5D`** (`docs/GIAO_DIEN_QUANLY.md`).
+- **Bản quản lý mặc định = quanlygieo2** (16/11): vẫn sửa `quanlygieo.html` (quanlygieo2 là file sinh); trong `ban_deploy/*` thì `quanlygieo.html` = nội dung quanlygieo2, bản không lớp phủ = `quanlygieo_cu.html`. Sidebar gọn + việc còn lại (bước B, C): `docs/KE_HOACH_THAY_QUANLYGIEO_VA_GON_SIDEBAR_16-11.md`.
 - CLAUDE.md đầy đủ cũ: `docs/luu_tru/CLAUDE_MD_DAY_DU_06-11-2026.md` — chỉ tra cứu.
 
 ## Kiểm tra
