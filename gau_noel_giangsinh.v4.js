@@ -1,4 +1,4 @@
-/* gau_noel_giangsinh.v3.js — Quay trúng gấu Giáng sinh 2026.
+/* gau_noel_giangsinh.v4.js — Quay trúng gấu Giáng sinh 2026 (v4: phát theo doanh thu, nhận tiếp số liệu v3).
  * Tài liệu, luật chơi và hướng dẫn gỡ chương trình: docs/HUONG_DAN_GAU_NOEL.md (không nằm trong bộ deploy).
  */
 (function (root) {
@@ -24,7 +24,19 @@
     heSoKhoNhanh: 0.7, heSoKhoCham: 1.25,
     tran: 0.6,
     bedToiThieu: 160000,
-    xoaMa: '2512'
+    xoaMa: '2512',
+    // ── v4 (16/11 chủ dự án chốt): gấu phát theo doanh thu từng ngày, phát hết kho tới 25/12 ──
+    chiPhiCap: 17800,                // lãi cặp = giá 2 ly − 2 × 8.900đ
+    ongR: 0.04,                      // ống may mắn: 4% lãi cặp mỗi lượt; đủ 17K → lượt kế tiếp chắc trúng
+    phanNoel: 0.20,                  // phần kho dành cho 23–25/12
+    noelChia: 5,                     // 23–25/12: cứ 5 bill ≥ 4 ly chắc trúng thì 1 bill nhường gấu cho bill 2 ly
+    rhoBuoc: 0.15,                   // tỉ lệ gấu / lãi đổi tối đa ±15% mỗi ngày
+    rhoSan: 0.2,                     // phần ngẫu nhiên tối thiểu = 20% tỉ lệ (gấu chắc trúng không ăn hết)
+    nhip: { xofa: 5, gg01: 4 },      // nhịp đông khách: N bill trong 10 phút, N−1 bill trước đều trượt → bill thứ N quay tại quán chắc trúng
+    nhipPhut: 10,
+    x2Thieu: 3,                      // tuần trước phát thiếu dự kiến ≥ 3 gấu → T2 & T4 tuần này tỉ lệ ×2
+    rhoDau: 0.06,                    // ngày đầu chưa có số lãi → tạm 6% lãi
+    pQuy2: 0.35                      // 23–25/12: bill 2 ly trượt mà còn gấu nhường → quay thêm 1 lần 35%
   };
   var KHO_NGAU = ['low', 'v45', 'v60', 'v80'];          // kho ngẫu nhiên theo giá mỗi lượt
   var KHO_CHAC = ['pity', 'big', 'bed'];                // kho chắc trúng (luôn trao, lấy dự phòng nếu vượt)
@@ -155,6 +167,121 @@
     return out;
   }
 
+  // ══ v4: phát theo doanh thu ══════════════════════════════════════════════════
+  // Kho quán (doc gau_noel_2026_kho/{quán}) thêm nhánh v4 — lần đầu bản mới chạm vào quán thì NHẬN TIẾP số liệu v3:
+  //   gấu còn = tong − phat (phat của v3 đã gồm mọi gấu đã trúng) → 80% ngày thường, 20% cho 23–25/12.
+  //   v4 = { thuong, noel, quy2, rho, laiTB, gEst, demBig, boost{tuần}, tuan{wk,du,phat}, tuanTruoc, hom{key,lai,du,phat,chac,rho,x2}, nhip[] }
+  //   rho = số gấu trên 1 đồng lãi nước. Mỗi ngày đặt lại = gấu còn × 17K ÷ (lãi TB / ngày × số ngày còn), đổi tối đa ±15%.
+  /** Giá từng ly nước tính tiền → { L: số lượt, v: giá 1 cặp, lai: lãi 1 cặp }. Bill lẻ bỏ 1 ly giá ở giữa; tối đa 3 lượt. */
+  function catBill(gia) {
+    var a = (gia || []).map(Number).filter(function (x) { return x > 0; }).sort(function (x, y) { return x - y; });
+    if (a.length % 2 === 1) a.splice((a.length - 1) / 2, 1);
+    var cap = a.length / 2, L = Math.min(3, cap);
+    if (!L) return { L: 0, v: 0, lai: 0 };
+    var v = a.reduce(function (s, x) { return s + x; }, 0) / cap;
+    return { L: L, v: v, lai: Math.max(0, v - CFG.chiPhiCap) };
+  }
+  function giaCua(don) {
+    if (Array.isArray(don.gia) && don.gia.length) return don.gia;
+    var ly = Number(don.ly) || 0, t = Number(don.tienNuoc) || 0, out = [];   // POS cũ chỉ gửi số ly + tổng tiền → chia đều
+    for (var i = 0; i < ly; i++) out.push(t / ly);
+    return out;
+  }
+  function dowCua(key) { return new Date(dayStart(key) + VN).getUTCDay(); }
+  function tuanCua(key) { return cong(key, -((dowCua(key) + 6) % 7)); }   // thứ Hai đầu tuần
+  function laNoelNgay(key) { return key >= CFG.noel[0]; }
+  /** Nhánh v4 của kho (tạo + nhận tiếp số liệu v3 nếu chưa có). Sửa tại chỗ. */
+  function khoV4(kho, key) {
+    if (kho.v4) return kho.v4;
+    var con = Math.max(0, (Number(kho.tong) || 0) - (Number(kho.phat) || 0)), noel = laNoelNgay(key) ? con : Math.round(con * CFG.phanNoel);
+    kho.v4 = { thuong: con - noel, noel: noel, quy2: 0, rho: null, laiTB: null, gEst: 0.4, demBig: 0, boost: {}, tuan: null, tuanTruoc: null, hom: null, nhip: [],
+      nhanTu: { phat: Number(kho.phat) || 0, tong: Number(kho.tong) || 0, at: key } };
+    return kho.v4;
+  }
+  /** Sang ngày mới: chốt ngày cũ (lãi TB, phần chắc trúng), chốt tuần (×2 tuần sau), đặt tỉ lệ hôm nay. Sửa v tại chỗ. */
+  function sangNgay(v, key) {
+    if (v.hom && v.hom.key === key) return v.hom;
+    var cu = v.hom, noel = laNoelNgay(key);
+    if (cu && cu.lai > 0) {
+      v.laiTB = v.laiTB == null ? cu.lai : 0.75 * v.laiTB + 0.25 * cu.lai;
+      if (cu.rho > 0) v.gEst = Math.min(0.8, 0.8 * (Number(v.gEst) || 0) + 0.2 * cu.chac * CFG.giaGau / (cu.rho * cu.lai));
+    }
+    var wk = tuanCua(key);
+    if (!v.tuan || v.tuan.wk !== wk) {
+      if (v.tuan) {
+        var thieu = (Number(v.tuan.du) || 0) - (Number(v.tuan.phat) || 0), on = !noel && thieu >= CFG.x2Thieu;
+        v.boost = v.boost || {}; if (on) v.boost[wk] = true;
+        v.tuanTruoc = { wk: v.tuan.wk, du: Math.round((Number(v.tuan.du) || 0) * 10) / 10, phat: Number(v.tuan.phat) || 0, x2: on };
+      }
+      v.tuan = { wk: wk, du: 0, phat: 0 };
+    }
+    var vaoNoel = noel && !(cu && laNoelNgay(cu.key));
+    if (vaoNoel && v.thuong > 0) { v.noel += v.thuong; v.thuong = 0; }   // phần ngày thường còn dư → chia nốt 23–25/12
+    var conNgay = noel ? soNgay(key, CFG.noel[2]) + 1 : soNgay(key, CFG.noel[0]), pool = noel ? v.noel : v.thuong;
+    var can = v.laiTB > 0 && conNgay > 0 ? pool * CFG.giaGau / (v.laiTB * conNgay) : CFG.rhoDau;
+    var rho = v.rho == null || vaoNoel ? can : Math.max(v.rho * (1 - CFG.rhoBuoc), Math.min(v.rho * (1 + CFG.rhoBuoc), can));
+    if (!(rho >= 0)) rho = CFG.rhoDau;
+    v.rho = rho;
+    var d = dowCua(key);
+    v.hom = { key: key, lai: 0, du: 0, phat: 0, chac: 0, rho: rho, x2: !noel && (d === 1 || d === 3) && !!(v.boost || {})[wk] };
+    return v.hom;
+  }
+  /**
+   * Bốc 1 bill (thuần, v4): khach = { ong }, v = nhánh v4 của kho (sửa tại chỗ), don = { ly, gia[], tienNuoc, bed160 }.
+   * Trả { luot: [{ k, win, noel }], ong, soLy } — k: rand | pity | big | bed | q2 (gấu bill 4 ly nhường cho bill 2 ly ngày Noel).
+   */
+  function bocThuan4(khach, v, don, ms, rand) {
+    var key = vnDay(ms), h = sangNgay(v, key), noel = laNoelNgay(key);
+    var gia = giaCua(don), c = catBill(gia), ly = gia.length, out = { luot: [], ong: Number(khach && khach.ong) || 0, soLy: ly };
+    var L = c.L, bed = !!don.bed160;
+    if (bed && !L) L = 1;
+    if (!L) return out;
+    var lai = c.lai, chacLy = ly >= (noel ? CFG.lyChacNoel : CFG.lyChac), wins = 0;
+    var rRand = Math.max(h.rho * CFG.rhoSan, h.rho * (1 - (Number(v.gEst) || 0)));
+    var lay = function () { if (noel) { if (v.noel <= 0) return false; v.noel--; } else { if (v.thuong <= 0) return false; v.thuong--; } return true; };
+    for (var l = 0; l < L; l++) {
+      var du = h.rho * lai / CFG.giaGau;
+      h.lai += lai; h.du += du; if (!noel && v.tuan) v.tuan.du += du;
+      out.ong += CFG.ongR * lai;
+      var k = null;
+      if (bed && l === 0) k = 'bed';
+      else if (out.ong >= CFG.giaGau) k = 'pity';
+      else if (chacLy && l === L - 1 && wins === 0) {
+        if (noel) { v.demBig = (Number(v.demBig) || 0) + 1; if (v.demBig % CFG.noelChia === 0) v.quy2 = (Number(v.quy2) || 0) + 1; else k = 'big'; }
+        else k = 'big';
+      }
+      if (!k) {
+        if (rand() < Math.min(CFG.tran, rRand * lai / CFG.giaGau * (h.x2 ? 2 : 1))) k = 'rand';
+        else if (noel && ly === 2 && v.quy2 >= 1 && rand() < CFG.pQuy2) { k = 'q2'; v.quy2--; }
+      }
+      if (k && !lay()) { if (k === 'q2') v.quy2++; k = null; }
+      if (k) {
+        wins++; h.phat++; if (!noel && v.tuan) v.tuan.phat++;
+        if (k !== 'rand' && k !== 'q2') h.chac++;
+        if (k === 'pity') out.ong -= CFG.giaGau;
+      }
+      out.luot.push({ k: k, win: !!k, noel: noel });
+    }
+    return out;
+  }
+  /** Ghi bill vào nhịp đông khách của quán (giữ bill trong 10 phút gần nhất). */
+  function ghiNhip(v, store, bill, ms, win) {
+    if (!CFG.nhip[store]) return;
+    var tu = ms - CFG.nhipPhut * 60e3;
+    v.nhip = (v.nhip || []).filter(function (x) { return x.t >= tu - 60e3; }).slice(-12);
+    v.nhip.push({ t: ms, bill: bill, win: !!win });
+  }
+  /** Bill này (vừa thua) có được nhịp đông khách tặng chắc trúng không: N−1 bill liền trước trong 10 phút đều trượt. */
+  function duocNhip(v, store, bill) {
+    var N = CFG.nhip[store], ds = v.nhip || [];
+    if (!N) return false;
+    var i = -1; for (var j = ds.length - 1; j >= 0; j--) if (ds[j].bill === bill) { i = j; break; }
+    if (i < 0 || ds[i].win) return false;
+    var truoc = ds.slice(0, i).filter(function (x) { return ds[i].t - x.t <= CFG.nhipPhut * 60e3; });
+    if (truoc.length < N - 1) return false;
+    return truoc.slice(-(N - 1)).every(function (x) { return !x.win; });
+  }
+
   var MA_CHU = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';   // bỏ 0/O, 1/I
   function maNhan(rand) { var s = 'GAU'; for (var i = 0; i < 5; i++) s += MA_CHU[Math.floor(rand() * MA_CHU.length) % MA_CHU.length]; return s; }
   function normPhone(p) {
@@ -180,7 +307,8 @@
     return {
       dangMua: dangMua(n), dangNhan: dangNhan(n), het: hetDot(n),
       chuaMo: dangNhan(n) ? l.filter(function (x) { return !x.opened && !x.huy; }) : [],
-      luot: l, qua: quaCua(d).filter(function (q) { return !q.huy; })
+      luot: l, qua: quaCua(d).filter(function (q) { return !q.huy; }),
+      ong: Math.max(0, Math.min(1, (Number(d && d.ong) || 0) / CFG.giaGau))   // [v4] ống may mắn 0–1 (đầy → lượt kế tiếp chắc trúng)
     };
   }
 
@@ -231,33 +359,35 @@
     rand = rand || Math.random;
     var p = normPhone(don && don.sdt);
     if (!FS || !don || p.length < 9 || !dangMua() || !hopLeQuan(don.store) || !hopLeBill(String(don.bill || ''))) return Promise.resolve({ soLuot: 0 });
-    if (!soLuot(don.ly) && !don.bed160) return Promise.resolve({ soLuot: 0 });
+    if (!catBill(giaCua(don)).L && !don.bed160) return Promise.resolve({ soLuot: 0 });
     var bill = String(don.bill), rk = refKhach(p), rq = refKho(don.store), kq = null;
     return FS.runTransaction(function (tx) {
       return Promise.all([tx.get(rk), tx.get(rq)]).then(function (ss) {
         var d = ss[0].exists ? ss[0].data() : {}, kho = ss[1].exists ? ss[1].data() : null, n = now();
         var cu = luotCua(d).filter(function (x) { return x.store === don.store && x.bill === bill; });
         if (cu.length) { kq = { soLuot: cu.length, trung: cu.filter(function (x) { return x.win; }).length, luot: cu, cu: true }; return; }
-        if (!kho) { kq = { soLuot: 0, loi: 'chua-co-kho' }; return; }
-        var r = bocThuan(d, kho, don, n, rand), at = new Date(n).toISOString(), luot = {}, qua = {}, list = [], ma = {};
-        var daCo = (d.qua || {}), maKho = kho.ma || {};
+        if (!kho || !(Number(kho.tong) > 0)) { kq = { soLuot: 0, loi: 'chua-co-kho' }; return; }
+        var key = vnDay(n), v = khoV4(kho, key), r = bocThuan4(d, v, don, n, rand), at = new Date(n).toISOString(), luot = {}, qua = {}, list = [], ma = {};
+        var daCo = (d.qua || {}), maKho = kho.ma || {}, thang = 0;
         r.luot.forEach(function (x, i) {
           var id = don.store + '_' + bill + '_' + i, code = null;
           if (x.win) {
+            thang++;
             var thu = 0;   // tối đa 60 lần (nguồn ngẫu nhiên hỏng / trùng liên tục) → đổi sang Math.random, rồi ghép thêm số thứ tự
             do { code = maNhan(thu < 30 ? rand : Math.random); thu++; } while ((daCo[code] || qua[code] || maKho[code]) && thu < 60);
             if (daCo[code] || qua[code] || maKho[code]) code = 'GAU' + ('00000' + (Object.keys(maKho).length + i + 1).toString(36).toUpperCase()).slice(-5);
             qua[code] = { store: don.store, bill: bill, luot: id, at: at, used: false }; }
-          luot[id] = { store: don.store, bill: bill, at: at, ly: Number(don.ly) || 0, tienNuoc: Number(don.tienNuoc) || 0,
-            k: x.k || '', w: x.w, win: x.win, code: code || '', opened: false };
-          if (x.carry) luot[id].carry = true;
+          luot[id] = { store: don.store, bill: bill, at: at, ly: r.soLy, tienNuoc: Number(don.tienNuoc) || 0,
+            k: x.k || '', w: key, win: x.win, code: code || '', opened: false, v: 4 };
+          if (x.noel) luot[id].noel = true;
           if (code) ma[code] = { sdt: p, bill: bill, at: at, used: false };
           list.push(Object.assign({ id: id }, luot[id]));
         });
-        tx.set(rk, { sdt: p, streak: r.streak, acc: r.acc, luot: luot, qua: qua, lastAt: at }, { merge: true });
+        ghiNhip(v, don.store, bill, n, thang > 0);
+        tx.set(rk, { sdt: p, ong: Math.round(r.ong), luot: luot, qua: qua, lastAt: at }, { merge: true });
         // sổ mã của quán (ma.{mã}) — Đổi quà đối chiếu cả 2 nơi: mã chỉ ghi vào hồ sơ khách (tự ghi được) thì không đổi được
-        tx.set(rq, { dung: kho.dung, pre: kho.pre, phat: kho.phat || 0, carry: kho.carry || 0, ma: ma, lastAt: at }, { merge: true });
-        kq = { soLuot: list.length, trung: list.filter(function (x) { return x.win; }).length, luot: list };
+        tx.set(rq, { v4: v, phat: (Number(kho.phat) || 0) + thang, ma: ma, lastAt: at }, { merge: true });
+        kq = { soLuot: list.length, trung: thang, luot: list };
       });
     }).then(function () { return kq; });
   }
@@ -271,7 +401,7 @@
 
   /** Mở (quay) 1 lượt đã bốc — app khách hoặc nút "Mở lượt tại quầy". id: mã lượt, hoặc mảng ưu tiên
    *  (lượt đầu tiên trong mảng còn chưa mở); không có / hết → lượt chưa mở cũ nhất. */
-  function mo(sdt, id) {
+  function mo(sdt, id, taiQuay) {
     var p = normPhone(sdt);
     if (!FS || p.length < 9) return Promise.reject(new Error('sdt'));
     if (!dangNhan()) return Promise.reject(new Error('het-dot'));
@@ -283,9 +413,30 @@
         if (Array.isArray(id)) { for (var i = 0; i < id.length && !x; i++) x = ds.filter(function (y) { return y.id === id[i]; })[0] || null; if (!x) x = ds[0]; }
         else x = id ? ds.filter(function (y) { return y.id === id; })[0] : ds[0];
         if (!x) { err = 'het-luot'; return; }
-        var u = {}; u['luot.' + x.id + '.opened'] = true; u['luot.' + x.id + '.openedAt'] = new Date(now()).toISOString();
-        tx.update(r, u);
+        var at = new Date(now()).toISOString(), u = {}; u['luot.' + x.id + '.opened'] = true; u['luot.' + x.id + '.openedAt'] = at;
         kq = { id: x.id, win: !!x.win, code: x.code || '', store: x.store, conLai: ds.length - 1 };
+        // [v4] nhịp đông khách: chỉ lượt QUAY TẠI QUẦY, bill đã trượt, N−1 bill liền trước trong 10 phút cũng trượt hết → chắc trúng
+        if (!taiQuay || x.win || !CFG.nhip[x.store] || !dangMua()) { tx.update(r, u); return; }
+        var rq = refKho(x.store);
+        return tx.get(rq).then(function (sq) {
+          var kho = sq.exists ? sq.data() : null, v = kho && kho.v4;
+          if (!v || !duocNhip(v, x.store, x.bill)) { tx.update(r, u); return; }
+          var noel = laNoelNgay(vnDay());
+          if (noel ? !(v.noel > 0) : !(v.thuong > 0)) { tx.update(r, u); return; }
+          var daCo = d.qua || {}, maKho = kho.ma || {}, code = null, thu = 0;
+          do { code = maNhan(Math.random); thu++; } while ((daCo[code] || maKho[code]) && thu < 60);
+          u['luot.' + x.id + '.win'] = true; u['luot.' + x.id + '.code'] = code; u['luot.' + x.id + '.k'] = 'nhip';
+          u['qua.' + code] = { store: x.store, bill: x.bill, luot: x.id, at: at, used: false };
+          tx.update(r, u);
+          var ku = { phat: (Number(kho.phat) || 0) + 1 };
+          ku['ma.' + code] = { sdt: p, bill: x.bill, at: at, used: false };
+          if (noel) ku['v4.noel'] = v.noel - 1; else ku['v4.thuong'] = v.thuong - 1;
+          if (v.hom && v.hom.key === vnDay()) { ku['v4.hom.phat'] = (Number(v.hom.phat) || 0) + 1; ku['v4.hom.chac'] = (Number(v.hom.chac) || 0) + 1; }
+          if (!noel && v.tuan) ku['v4.tuan.phat'] = (Number(v.tuan.phat) || 0) + 1;
+          ku['v4.nhip'] = (v.nhip || []).map(function (y) { return y.bill === x.bill ? Object.assign({}, y, { win: true }) : y; });
+          tx.update(rq, ku);
+          kq.win = true; kq.code = code; kq.nhip = true;
+        });
       });
     }).then(function () { if (err) throw new Error(err); return kq; });
   }
@@ -335,12 +486,15 @@
         if (!ss[0].exists) return;
         var d = ss[0].data(), kho = ss[1].exists ? ss[1].data() : {}, u = {}, ku = {}, ds = luotCua(d).filter(function (x) { return x.store === store && x.bill === bill && !x.huy; });
         if (!ds.length) return;
-        var dung = kho.dung || {}, pre = kho.pre || {}, phat = Number(kho.phat) || 0, canh = Number(kho.canhBao) || 0, carry = Number(kho.carry) || 0;
+        var dung = kho.dung || {}, pre = kho.pre || {}, phat = Number(kho.phat) || 0, canh = Number(kho.canhBao) || 0, carry = Number(kho.carry) || 0, v4Noel = 0, v4Thuong = 0;
         ds.forEach(function (x) {
           kq.bo++;
           var q = x.code ? (d.qua || {})[x.code] : null;
           if (q && q.used) { kq.daNhan++; canh++; u['luot.' + x.id + '.huy'] = true; u['qua.' + x.code + '.billHuy'] = true; return; }
-          if (x.win && x.k && x.w) {
+          if (x.win && kho.v4) {   // v4: trả gấu về phần kho của ngày đó (đã sang 23–25/12 thì vào phần Noel)
+            if (x.noel || laNoelNgay(vnDay())) v4Noel++; else v4Thuong++;
+            phat = Math.max(0, phat - 1); kq.traKho++;
+          } else if (x.win && x.k && x.w) {
             var dw = dung[x.w] = dung[x.w] || {}; dw[x.k] = Math.max(0, (Number(dw[x.k]) || 0) - 1);
             if (x.w.charAt(0) === 'W') pre[x.k] = Math.max(0, (Number(pre[x.k]) || 0) - 1);
             phat = Math.max(0, phat - 1); kq.traKho++;
@@ -352,6 +506,7 @@
         tx.update(rk, u);
         if (ss[1].exists) {
           ku.dung = dung; ku.pre = pre; ku.phat = phat; ku.canhBao = canh; ku.carry = carry;
+          if (kho.v4) { ku['v4.noel'] = (Number(kho.v4.noel) || 0) + v4Noel; ku['v4.thuong'] = (Number(kho.v4.thuong) || 0) + v4Thuong; }
           tx.update(rq, ku);
         }
       });
@@ -363,6 +518,46 @@
   function luuKho(store, cap, tong) {
     if (!hopLeQuan(store)) return Promise.reject(new Error('quan'));
     return refKho(store).set({ cap: cap, tong: Math.max(0, Math.round(Number(tong) || 0)) }, { merge: true });
+  }
+  /** v4: đặt tổng gấu của quán (lần đầu nhập kho). Quán đã có kho thì dùng napThem. */
+  function datKho(store, tong) {
+    if (!hopLeQuan(store)) return Promise.reject(new Error('quan'));
+    tong = Math.max(0, Math.round(Number(tong) || 0));
+    if (!tong) return Promise.reject(new Error('so'));
+    var rq = refKho(store), err = null;
+    return FS.runTransaction(function (tx) {
+      return tx.get(rq).then(function (s) {
+        var k = s.exists ? s.data() : {};
+        if (Number(k.tong) > 0) { err = 'da-co-kho'; return; }
+        tx.set(rq, { tong: tong, phat: Number(k.phat) || 0 }, { merge: true });
+      });
+    }).then(function () { if (err) throw new Error(err); return true; });
+  }
+  /** v4: quản lý nạp thêm n gấu cho quán → cộng vào kho, tỉ lệ tự lên từ hôm sau. */
+  function napThem(store, n) {
+    if (!hopLeQuan(store)) return Promise.reject(new Error('quan'));
+    n = Math.round(Number(n) || 0);
+    if (!(n > 0)) return Promise.reject(new Error('so'));
+    var rq = refKho(store), err = null;
+    return FS.runTransaction(function (tx) {
+      return tx.get(rq).then(function (s) {
+        var k = s.exists ? s.data() : null;
+        if (!k || !(Number(k.tong) > 0)) { err = 'chua-co-kho'; return; }
+        var key = vnDay(), u = { tong: Number(k.tong) + n };
+        if (k.v4) { if (laNoelNgay(key)) u['v4.noel'] = (Number(k.v4.noel) || 0) + n; else u['v4.thuong'] = (Number(k.v4.thuong) || 0) + n; }
+        u['napLog.' + new Date(now()).toISOString().replace(/[.:\-]/g, '')] = n;   // nhật ký nạp thêm (thời điểm → số con)
+        tx.update(rq, u);
+      });
+    }).then(function () { if (err) throw new Error(err); return true; });
+  }
+  /** Tên khách (hồ sơ tích điểm dùng chung) cho danh sách đang hiện — chỉ đọc đúng các SĐT truyền vào. */
+  function tenKhach(sdts) {
+    var out = {};
+    return Promise.all((sdts || []).map(function (p) {
+      return FS.collection('customers').doc(p).get().then(function (s) {
+        var d = s.exists ? s.data() || {} : {}; out[p] = String(d.nickname || d.name || '').trim();
+      }).catch(function () { out[p] = ''; });
+    })).then(function () { return out; });
   }
   function docKho() {
     return FS.collection(CFG.khoColl).get().then(function (snap) {
@@ -403,10 +598,11 @@
       q.tong = Number(k.tong) || 0; q.phat = Number(k.phat) || 0; q.con = Math.max(0, q.tong - q.phat); q.canhBao = Number(k.canhBao) || 0; q.kho = k;
     });
     (ds || []).forEach(function (row) {
-      var d = row.data || {}, kh = { sdt: row.id, luot: 0, trung: 0, nhan: 0, cho: 0, quan: {}, lanCuoi: '', theoNgay: {}, nghi: [] };
+      var d = row.data || {}, kh = { sdt: row.id, luot: 0, chuaQuay: 0, trung: 0, nhan: 0, cho: 0, quan: {}, luotQuan: {}, lanCuoi: '', gan: String(d.lastAt || ''), ong: Math.min(1, (Number(d.ong) || 0) / CFG.giaGau), theoNgay: {}, nghi: [] };
       luotCua(d).forEach(function (x) {
         if (x.huy) return;
-        var q = Q(x.store); q.luot++; kh.luot++;
+        var q = Q(x.store); q.luot++; kh.luot++; kh.luotQuan[x.store] = (kh.luotQuan[x.store] || 0) + 1; if (!x.opened) kh.chuaQuay++;
+        if (String(x.openedAt || '') > kh.gan) kh.gan = String(x.openedAt);
         if (ngayCua(x.at) === hom) q.luotHom++;
         if (x.win) { q.trung++; kh.trung++; if (ngayCua(x.at) === hom) q.trungHom++; }
       });
@@ -419,6 +615,7 @@
           var nd = ngayCua(g.usedAt); if (nd === hom) q.nhanHom++;
           kh.theoNgay[nd] = (kh.theoNgay[nd] || 0) + 1;
           if (String(g.usedAt || '') > kh.lanCuoi) kh.lanCuoi = String(g.usedAt || '');
+          if (String(g.usedAt || '') > kh.gan) kh.gan = String(g.usedAt || '');
         } else { q.cho++; kh.cho++; }
       });
       if (!kh.luot && !kh.trung) return;
@@ -481,6 +678,7 @@
     soLuot: soLuot, bandOf: bandOf, pTurn: pTurn, nguongLai: nguongLai, chacTrung: chacTrung, laiDon: laiDon,
     conKho: conKho, heSoKho: heSoKho, heSoNgayGio: heSoNgayGio, bocThuan: bocThuan, maNhan: maNhan, normPhone: normPhone,
     stateOf: stateOf, init: init, boc: boc, load: load, mo: mo, quaTaiQuan: quaTaiQuan, doi: doi, huyBill: huyBill,
+    catBill: catBill, congNgay: cong, khoV4: khoV4, sangNgay: sangNgay, bocThuan4: bocThuan4, duocNhip: duocNhip, ghiNhip: ghiNhip, tuanCua: tuanCua, datKho: datKho, napThem: napThem, tenKhach: tenKhach,
     docKhach: function (p) { return refKhach(p); },
     luuKho: luuKho, docKho: docKho, NGHI: NGHI, tongHop: tongHop, khoKichBan: khoKichBan, dashboard: dashboard, thongKe: thongKe, xoaHet: xoaHet,
     _setOffset: function (v) { offset = v; }
@@ -633,7 +831,7 @@
     phat('mo', { sdt: sdt });
     bQuay.onclick = function () {
       bQuay.disabled = true; bX.disabled = true; msg.textContent = 'Đang quay…';
-      G.mo(sdt, uuTien && uuTien.length ? uuTien : undefined).then(function (kq) {
+      G.mo(sdt, uuTien && uuTien.length ? uuTien : undefined, true).then(function (kq) {   // true = quay tại quầy (nhịp đông khách)
         var q = store(), taiDay = kq.win && kq.store === q;
         // trúng gấu của quán này → đổi luôn (song song lúc vòng đang quay)
         var nhan = taiDay ? G.doi(q, sdt, kq.code, 'quay tại quầy').then(function () { return true; }, function (e) { return e; }) : Promise.resolve(false);
@@ -767,19 +965,19 @@
     if (!G.dangMua() || !don.store) return;
     var sdt = G.normPhone(don.sdt);
     if (sdt.length < 10) return;
-    if (G.soLuot(don.ly) === 0 && !don.bed160) return;
+    if (!G.catBill(don.gia || []).L && G.soLuot(don.ly) === 0 && !don.bed160) return;
     return G.boc(don).then(function (kq) { sauBoc(sdt, kq); return kq; })
       .catch(function (e) { console.warn('[gấu] bốc thăm lỗi', e); toast('⚠️ Chưa bốc được lượt gấu Noel (' + e.message + ')'); return null; });
   }
   function demLy(items, laNuoc) {
-    var ly = 0, tien = 0;
+    var ly = 0, tien = 0, gia = [];   // gia: giá từng ly (v4 tính lượt theo cặp 2 ly)
     (items || []).forEach(function (c) {
       if (!c || !laNuoc(c)) return;
       var q = Number(c.qty) || 0, p = Number(c.price) || 0;
       if (p <= 0 || q <= 0) return;
-      ly += q; tien += p * q;
+      ly += q; tien += p * q; for (var i = 0; i < q && i < 50; i++) gia.push(p);
     });
-    return { ly: ly, tien: tien };
+    return { ly: ly, tien: tien, gia: gia };
   }
 
   // ── The cafe 33 ──
@@ -802,7 +1000,7 @@
       var n = demLy(items, function (c) { return !laAnVat(c) && !laKhac(c); });
       // [v3] «Nợ cũ» (khách trả nợ) không phải tiền bed / nước → không tính vào mốc 160K (giữ nguyên cách nhận dạng của _isKhacLine)
       var bedTien = 0; items.forEach(function (c) { if (c && !laAnVat(c) && String(c.name || '').trim().toLowerCase().indexOf('nợ cũ') !== 0) bedTien += (Number(c.price) || 0) * (Number(c.qty) || 0); });
-      return { store: 'tc33', sdt: finalSdt, bill: String(orderData && orderData.id || ''), ly: n.ly, tienNuoc: n.tien, bed160: !!(vaoBed && booking) && bedTien > G.CFG.bedToiThieu };
+      return { store: 'tc33', sdt: finalSdt, bill: String(orderData && orderData.id || ''), ly: n.ly, gia: n.gia, tienNuoc: n.tien, bed160: !!(vaoBed && booking) && bedTien > G.CFG.bedToiThieu };
     };
     boc('_pushPaidOrder', function (cu) { return function (orderData, finalSdt, currentBooking, isCheckout, done) { cho = { o: orderData, s: finalSdt, b: currentBooking, vao: typeof done === 'function' && !isCheckout }; return cu.apply(this, arguments); }; });
     // clearDebtAfterPayment chỉ được gọi ở nhánh LƯU THÀNH CÔNG của _pushPaidOrder
@@ -842,7 +1040,7 @@
         finally {   // đơn đã lưu trước khi hàm này chạy → bốc kể cả khi phần tích điểm lỗi
           if (!quaApp) an(function () {
             var n = demLy(items, function (c) { return typeof isPaidCupLine === 'function' ? isPaidCupLine(c) : (!c.isFood && !c.isFree && !c._discountId); });
-            chayBoc({ store: 'xofa', sdt: sdt, bill: String(orderId || ''), ly: n.ly, tienNuoc: n.tien });
+            chayBoc({ store: 'xofa', sdt: sdt, bill: String(orderId || ''), ly: n.ly, gia: n.gia, tienNuoc: n.tien });
           })();
         }
       };
@@ -860,7 +1058,7 @@
         finally {   // gọi ngay sau khi đơn đã lưu → bốc kể cả khi phần thống kê gợi ý lỗi
           if (!(order && order.isAppSale)) an(function () {   // [16/10] bán qua app không tích điểm → không lượt gấu
             var n = demLy(order && order.itemsArray, laNuocGieo);
-            var pr = chayBoc({ store: store(), sdt: order && order.phone, bill: String(orderId || ''), ly: n.ly, tienNuoc: n.tien });
+            var pr = chayBoc({ store: store(), sdt: order && order.phone, bill: String(orderId || ''), ly: n.ly, gia: n.gia, tienNuoc: n.tien });
             if (pr && bocCua && order && typeof order === 'object') bocCua.set(order, pr);
           })();
         }
@@ -886,7 +1084,7 @@
       });
     }
     var gauDuDieuKien = function (order) {
-      try { return !!order && !order.isAppSale && G.dangMua() && G.normPhone(order.phone).length >= 10 && G.soLuot(demLy(order.itemsArray, laNuocGieo).ly) > 0; } catch (e) { return false; }
+      try { return !!order && !order.isAppSale && G.dangMua() && G.normPhone(order.phone).length >= 10 && G.catBill(demLy(order.itemsArray, laNuocGieo).gia).L > 0; } catch (e) { return false; }
     };
     try {
       var PP = POSPrinter, inCu = PP && PP.autoPrintIfEnabled;
@@ -903,7 +1101,7 @@
       return function (order) {
         var r = cu.apply(this, arguments);
         try {
-          var L = G.soLuot(demLy(order && order.itemsArray, laNuocGieo).ly);
+          var L = G.catBill(demLy(order && order.itemsArray, laNuocGieo).gia).L;
           if (Array.isArray(r) && L > 0 && !order.isAppSale && !(noiQuay && (noiQuay.get(order) === 'quan' || noiQuay.get(order) === 'khong')) && G.dangMua() && G.normPhone(order.phone).length >= 10) r = r.concat([{ type: 'gauNoel', soLuot: L }]);
         } catch (e) { console.warn('[gấu] bill', e); }
         return r;
@@ -982,28 +1180,26 @@
     var pane = document.createElement('div'); pane.id = 'mgr-c-gaunoel';
     pane.style.cssText = 'display:none;flex-direction:column;flex:1;overflow:auto;min-height:0;padding:20px;gap:14px;';
     colC.appendChild(pane);
-    var CHANG = [['open', 'Mở màn'], ['week', 'Mỗi tuần'], ['p15', '15–22/12'], ['pre', 'Trước 23 (trần)'], ['n0', '23/12'], ['n1', '24/12'], ['n2', '25/12']];
-    var inp = 'width:64px;padding:6px 8px;border-radius:10px;border:1.5px solid #e5e7eb;font-weight:700;text-align:right;';
+    // [v4] kho mỗi quán chỉ còn: tổng gấu, đã phát (gồm cả số bản cũ), nạp thêm (quản lý tự quyết)
     function veKho(id, k) {
-      var cap = k.cap || {}, rows = G.KHO_NGAU.map(function (b) {
-        var c = cap[b] || {};
-        return '<tr><td style="padding:4px 8px;white-space:nowrap;">' + esc(G.TEN_KHO[b]) + '</td>' + CHANG.map(function (x) {
-          var v = x[0].charAt(0) === 'n' && x[0].length === 2 ? (c.n || [])[+x[0].charAt(1)] : c[x[0]];
-          return '<td style="padding:3px;"><input type="number" min="0" data-b="' + b + '" data-c="' + x[0] + '" value="' + (Number(v) || 0) + '" style="' + inp + '"></td>';
-        }).join('') + '</tr>';
-      }).join('');
-      var phat = Number(k.phat) || 0, doi = Number(k.doi) || 0;
-      return '<div data-quan="' + esc(id) + '" style="padding:14px;border-radius:16px;border:1.5px solid #e5e7eb;background:#fff;">' +
-        '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><b style="font-size:15px;">' + esc(G.tenQuan(id)) + '</b>' +
-        '<span style="font-size:12px;color:#6b7280;">đã trúng ' + phat + ' · đã nhận ' + doi + ' · chờ nhận ' + Math.max(0, phat - doi) + (k.canhBao ? ' · <b style="color:#b91c1c;">⚠️ ' + k.canhBao + ' bill đã xoá có gấu đã nhận</b>' : '') + '</span></div>' +
-        '<div style="overflow-x:auto;margin-top:8px;"><table style="border-collapse:collapse;font-size:12.5px;"><tr style="color:#6b7280;"><th style="text-align:left;padding:4px 8px;">Kho ngẫu nhiên</th>' +
-        CHANG.map(function (x) { return '<th style="padding:4px;font-weight:700;">' + x[1] + '</th>'; }).join('') + '</tr>' + rows + '</table></div>' +
-        '<div style="display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap;font-size:13px;">Số gấu thật của quán (trần cứng, gồm cả lượt chắc trúng): ' +
-        '<input type="number" min="0" data-tong="1" value="' + (Number(k.tong) || 0) + '" style="' + inp + 'width:80px;">' +
-        '<button class="gn-btn gn-g" data-luu="1">Lưu kho</button><span data-msg="1" style="color:#6b7280;"></span></div></div>';
+      var tong = Number(k.tong) || 0, phat = Number(k.phat) || 0, doi = Number(k.doi) || 0, v = k.v4;
+      var dong = function (a, b) { return '<div class="gd4-l"><span>' + a + '</span>' + b + '</div>'; };
+      var h = '<div class="gd4-k" data-quan="' + esc(id) + '" style="--c:' + mau(id) + '"><h5>' + esc(G.tenQuan(id)) + '</h5>';
+      if (!tong) {
+        h += '<div class="gd4-note">Chưa nhập kho: quán này chưa bốc lượt.</div>' +
+          dong('Số gấu của quán', '<span><input type="number" min="1" data-tong="1" aria-label="Số gấu ' + esc(G.tenQuan(id)) + '"> <button class="gn-btn gn-g" data-dat="1" type="button">Nhập kho</button></span>');
+      } else {
+        h += dong('Kho cả đợt', '<b>' + tong + ' con</b>') +
+          dong('Đã phát' + (v && v.nhanTu && v.nhanTu.phat ? ' (gồm ' + v.nhanTu.phat + ' con bản cũ)' : ''), '<b>' + phat + ' con</b>') +
+          dong('Đã nhận · chờ nhận', '<b>' + doi + ' · ' + Math.max(0, phat - doi) + '</b>') +
+          (v ? dong('Còn ngày thường · phần 23–25/12', '<b>' + Math.max(0, v.thuong) + ' · ' + Math.max(0, v.noel) + '</b>') : '') +
+          dong('Nạp thêm', '<span><input type="number" min="1" data-nap-so="1" value="" aria-label="Nạp thêm ' + esc(G.tenQuan(id)) + '"> <button class="gn-btn gn-g" data-nap="1" type="button">Nạp</button></span>') +
+          (k.canhBao ? '<div class="gd-warn">⚠️ ' + k.canhBao + ' bill đã xoá có gấu đã nhận</div>' : '');
+      }
+      return h + '<div data-msg="1" class="gd4-note"></div></div>';
     }
     // ── DASHBOARD (phong cách thẻ điểm bán của manage) ──
-    var dashCss = false, dashCache = null, dashLuc = 0, locSdt = '', xemHet = false;
+    var dashCss = false, dashCache = null, dashLuc = 0, locSdt = '', dsLoai = 'gan', dsTg = 'all', dsQ = '', dsHien = 15, tenCache = {};
     var MAU = { tc33: '#006241', xofa: '#e2541c', gg01: '#c2185b' }, CHU = { tc33: '33', xofa: 'X', gg01: 'G' };
     function mau(q) { return MAU[q] || (/^gg/.test(q) ? '#c2185b' : '#475569'); }
     function chuQ(q) { return CHU[q] || (/^gg/.test(q) ? 'G' : String(q).slice(0, 2).toUpperCase()); }
@@ -1033,11 +1229,25 @@
         '#gn-dash .gd-q{display:inline-block;padding:2px 7px;border-radius:99px;font-size:11px;font-weight:800;color:#fff;margin-left:3px}' +
         '#gn-dash tr.nghi td{background:#fef2f2}#gn-dash .gd-flag{display:inline-block;padding:2px 8px;border-radius:99px;background:#dc2626;color:#fff;font-size:10.5px;font-weight:800;margin-left:6px}' +
         '#gn-dash .gd-tools{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}#gn-dash .gd-tools input{padding:7px 10px;border-radius:12px;border:1.5px solid #e5e7eb;font-weight:700;width:170px}' +
+        '#gn-dash .gd4-txt{margin-top:10px;padding:10px 12px;border-radius:14px;background:#fff;border:1px solid color-mix(in srgb,var(--c) 18%,#fff);font-size:13px;line-height:1.55}' +
+        '#gn-dash .gd4-seg{display:flex;gap:6px;flex-wrap:wrap}#gn-dash .gd4-seg .gn-btn{font-size:12.5px}#gn-dash .gd4-seg .gn-btn.on{background:#14251f;color:#fff}' +
+        '#gn-dash .gd4-seg .gn-btn span{display:inline-block;min-width:18px;margin-left:5px;padding:0 5px;border-radius:99px;background:rgba(127,127,127,.18);font-size:11px}' +
+        '#gn-dash .gd-tools select{padding:7px 10px;border-radius:12px;border:1.5px solid #e5e7eb;font-weight:700;font-family:inherit;background:#fff;color:#14251f}' +
+        '#gn-dash .gd4-ten{font-weight:800;color:#14251f}#gn-dash .gd4-ten small{display:block;font-weight:600;color:#6b7280;font-size:11.5px}' +
+        '#gn-dash .gd4-ong .gd-bar{width:70px}#gn-dash .gd4-ong .gd-bar>i{background:#d49b1c}#gn-dash td.l,#gn-dash th.l{text-align:left}' +
+        '#gn-dash .gd4-note,#mgr-c-gaunoel .gd4-note{font-size:12px;color:#6b7280;line-height:1.55}' +
+        '#mgr-c-gaunoel .gd4-kho{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}' +
+        '#mgr-c-gaunoel .gd4-k{--c:#475569;border-radius:20px;border:1px solid color-mix(in srgb,var(--c) 16%,#fff);background:color-mix(in srgb,var(--c) 4%,#fff);padding:14px 16px;display:flex;flex-direction:column;gap:10px}' +
+        '#mgr-c-gaunoel .gd4-k h5{margin:0;font-size:14.5px;font-weight:900;color:var(--c)}#mgr-c-gaunoel .gd4-l{display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:13px;color:#4b5563}' +
+        '#mgr-c-gaunoel .gd4-l b{color:#14251f;font-size:14px}#mgr-c-gaunoel .gd4-l input{width:80px;padding:6px 8px;border-radius:10px;border:1.5px solid #e5e7eb;font-weight:800;text-align:right;font-family:inherit}' +
+        '#mgr-c-gaunoel #gn-kho-card{border-radius:24px;border:1px solid #e5e7eb;background:#fff;padding:16px 18px}#mgr-c-gaunoel #gn-kho-card h4{margin:0 0 10px;font-size:15px;font-weight:900;color:#14251f}' +
+        '#mgr-c-gaunoel .gd-warn{font-size:11.5px;font-weight:800;color:#b91c1c}' +
         '@media(max-width:760px){#gn-dash .gd-hero{grid-template-columns:1fr}#gn-dash .gd-big{font-size:44px}}';
       document.head.appendChild(c);
     }
-    function o2(a) { var x = a[0], y = a[1], pc = y ? Math.min(100, Math.round(x * 100 / y)) : 0;
-      return '<span class="gd-cell">' + x + '/' + y + '<span class="gd-bar' + (y && x >= y ? ' het' : '') + '"><i style="width:' + pc + '%"></i></span></span>'; }
+    function so1(x) { x = Number(x) || 0; return Math.round(x * 10) / 10; }
+    function o2(a, deu) {   // deu: bảng phát theo doanh thu — vượt dự kiến không tô đỏ var x = a[0], y = a[1], pc = y ? Math.min(100, Math.round(x * 100 / y)) : 0;
+      return '<span class="gd-cell">' + x + '/' + String(y).replace('.', ',') + '<span class="gd-bar' + (!deu && y && x >= y ? ' het' : '') + '"><i style="width:' + pc + '%"></i></span></span>'; }
     function veDash(box, ep) {
       if (!box) return; napCss();
       if (!ep && dashCache && Date.now() - dashLuc < 120000) { veDashData(box, dashCache); return; }
@@ -1048,13 +1258,28 @@
     function veDashData(box, D) {
       var he = D.he, ids = ['tc33', 'xofa', 'gg01']; Object.keys(D.quan).forEach(function (q) { if (ids.indexOf(q) < 0) ids.push(q); });
       var pcPhat = he.tong ? Math.min(100, Math.round(he.phat * 100 / he.tong)) : 0;
+      var v4 = function (q) { var k = D.quan[q] && D.quan[q].kho; return k && k.v4 ? k.v4 : null; };
+      var homCua = function (v) { return v && v.hom && v.hom.key === D.hom ? v.hom : null; };
+      var duHom = 0; ids.forEach(function (q) { var hh = homCua(v4(q)); if (hh) duHom += Number(hh.du) || 0; });
+      var wkNay = G.tuanCua(D.hom), x2 = ids.filter(function (q) { var v = v4(q); return v && v.boost && v.boost[wkNay]; });
       var h = '<div class="gd-head"><b>📊 Dashboard Gấu Noel</b><small>' + D.hom.split('-').reverse().join('/') + ' · cập nhật ' + new Date(dashLuc).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) +
         '</small><button class="gn-btn gn-x" data-dash="lai">↻ Làm mới</button></div>';
       // hệ thống
       h += '<div class="gd-hero"><div><div class="gd-eb">🧸 Hôm nay đã tặng (trúng)</div><div class="gd-big">' + he.trungHom + '<span>gấu</span></div>' +
-        '<div class="gd-sub">Đã nhận hôm nay <b>' + he.nhanHom + '</b> · lượt quay hôm nay <b>' + he.luotHom + '</b>' + (D.nghi ? ' · <b style="color:#b91c1c">' + D.nghi + ' SĐT cần xem lại</b>' : '') + '</div></div>' +
+        '<div class="gd-sub">Đã nhận hôm nay <b>' + he.nhanHom + '</b> · lượt quay hôm nay <b>' + he.luotHom + '</b> · dự kiến theo doanh thu hôm nay <b>' + String(so1(duHom)).replace('.', ',') + '</b>' + (D.nghi ? ' · <b style="color:#b91c1c">' + D.nghi + ' SĐT cần xem lại</b>' : '') + '</div></div>' +
         '<div><div class="gd-row"><span>Cả đợt đã phát</span><strong>' + he.phat + ' / ' + he.tong + '</strong></div><div class="gd-track"><i style="width:' + pcPhat + '%"></i></div>' +
         '<div class="gd-mini"><div><span>Còn trong kho</span><b>' + he.con + '</b></div><div><span>Đã nhận</span><b>' + he.nhan + '</b></div><div><span>Chờ nhận</span><b>' + he.cho + '</b></div></div></div></div>';
+      // [v4] tuần trước phát thiếu dự kiến ≥ 3 gấu → Thứ 2 & Thứ 4 tuần này ×2: báo để quản lý quảng cáo
+      if (x2.length) {
+        var t2 = G.congNgay(wkNay, 0), t4 = G.congNgay(wkNay, 2), dm = function (k) { return k.slice(8, 10) + '/' + k.slice(5, 7); };
+        var tenX2 = x2.map(function (q) { return G.tenQuan(q); }).join(' và ');
+        var loi = '🎄 Thứ 2 (' + dm(t2) + ') & Thứ 4 (' + dm(t4) + ') tuần này: tỉ lệ trúng gấu Noel ×2 tại ' + tenX2 + '! Mua từ 2 ly, đọc SĐT tích điểm để nhận lượt quay.';
+        h += '<div class="gd-hero" style="--c:#e2541c"><div><div class="gd-eb">📣 Tuần này ' + dm(wkNay) + ' – ' + dm(G.congNgay(wkNay, 6)) + '</div><div class="gd-big">×2<span>Thứ 2 &amp; Thứ 4</span></div>' +
+          '<div class="gd-sub">Tuần trước phát ít hơn dự kiến theo doanh thu: ' + x2.map(function (q) { var t = v4(q).tuanTruoc || {}; return '<b>' + esc(G.tenQuan(q)) + ' ' + Math.max(0, Math.round((t.du || 0) - (t.phat || 0))) + ' gấu</b>'; }).join(' · ') +
+          '. Số này được phát bù vào Thứ 2 và Thứ 4.</div></div>' +
+          '<div><div class="gd-eb" style="font-size:12.5px">Lời thông báo gợi ý (fanpage, bảng quầy)</div><div class="gd4-txt" data-x2txt="1">' + esc(loi) + '</div>' +
+          '<div style="margin-top:10px"><button class="gn-btn" type="button" data-dash="chep" style="background:#e2541c">Chép lời thông báo</button></div></div></div>';
+      }
       // từng quán
       h += '<div class="gd-ws">' + ids.map(function (q) {
         var x = D.quan[q] || { trungHom: 0, nhanHom: 0, trung: 0, nhan: 0, cho: 0, tong: 0, phat: 0, con: 0, canhBao: 0 }, pc = x.tong ? Math.min(100, Math.round(x.phat * 100 / x.tong)) : 0;
@@ -1064,31 +1289,64 @@
           '<div class="gd-met"><div><span>Nhận hôm nay</span><b>' + x.nhanHom + '</b></div><div><span>Chờ nhận</span><b>' + x.cho + '</b></div><div><span>Còn kho</span><b>' + x.con + '</b></div></div>' +
           (x.canhBao ? '<div class="gd-warn">⚠️ ' + x.canhBao + ' bill đã xoá có gấu đã nhận</div>' : '') + '</div>';
       }).join('') + '</div>';
-      // kho từng kịch bản
-      h += '<div class="gd-card"><h4>Kho từng kịch bản (đã phát / trần)</h4><div style="overflow-x:auto">' + ids.filter(function (q) { return D.quan[q] && D.quan[q].kho; }).map(function (q) {
-        var kb = G.khoKichBan(D.quan[q].kho, D.hom), tenCh = kb.type === 'open' ? 'Tuần mở màn' : kb.type === 'week' ? 'Tuần này (' + kb.w + ')' : kb.type === 'pre' ? '15–22/12' : kb.type === 'noel' ? '23–25/12' : 'Ngoài đợt';
-        return '<div style="--c:' + mau(q) + ';margin-bottom:12px"><div style="font-weight:800;margin:4px 0 6px;color:' + mau(q) + '">' + esc(G.tenQuan(q)) + '</div>' +
-          '<table><tr><th>Kịch bản</th><th>' + tenCh + '</th><th>Trước 23/12</th><th>23/12</th><th>24/12</th><th>25/12</th></tr>' +
-          G.KHO_NGAU.map(function (k) { var r = kb.ngau[k]; return '<tr><td>' + esc(G.TEN_KHO[k]) + '</td><td>' + (r.chang ? o2(r.chang) : '–') + '</td><td>' + o2(r.truoc23) + '</td><td>' + o2(r.noel[0]) + '</td><td>' + o2(r.noel[1]) + '</td><td>' + o2(r.noel[2]) + '</td></tr>'; }).join('') +
-          G.KHO_CHAC.filter(function (k) { return k !== 'bed' || q === 'tc33'; }).map(function (k) { return '<tr><td>' + esc(G.TEN_KHO[k]) + ' <small style="color:#6b7280">(chắc trúng)</small></td><td colspan="5" style="text-align:left">đã trao <b>' + kb.chac[k] + '</b> con</td></tr>'; }).join('') +
-          '<tr><td>Phần trước 23/12 chưa phát</td><td colspan="5" style="text-align:left">còn <b>' + kb.conTruoc23 + '</b> con · đã dùng cho 23–25/12 <b>' + kb.carry + '</b></td></tr></table></div>';
-      }).join('') + '</div></div>';
-      // khách
-      var loc = G.normPhone(locSdt), ds = D.khach.filter(function (k) { return !loc || k.sdt.indexOf(loc) >= 0; }), hien = xemHet ? ds : ds.slice(0, 30);
-      h += '<div class="gd-card"><h4>Khách đã trúng / nhận gấu</h4><div class="gd-tools"><input id="gd-loc" placeholder="Tìm SĐT…" value="' + esc(locSdt) + '">' +
-        '<small style="color:#6b7280">' + ds.length + ' SĐT · nghi ngờ khi: nhận từ ' + G.NGHI.nhan + ' con, ' + G.NGHI.ngay + ' con trong 1 ngày, hoặc trúng ≥ ' + Math.round(G.NGHI.tiLe * 100) + '% (từ ' + G.NGHI.tiLeLuot + ' lượt)</small></div>' +
-        '<div style="overflow-x:auto"><table><tr><th>SĐT</th><th>Lượt</th><th>Trúng</th><th>Đã nhận</th><th>Chờ nhận</th><th style="text-align:left">Quán</th><th>Nhận gần nhất</th></tr>' +
+      // [v4] phát theo doanh thu (thay bảng «Kho từng kịch bản»)
+      h += '<div class="gd-card"><h4>Phát theo doanh thu</h4><div style="overflow-x:auto"><table><tr><th>Quán</th><th>Lãi nước hôm nay</th><th>Hôm nay (đã phát / dự kiến)</th><th>Tuần này (đã phát / dự kiến)</th><th>Tỉ lệ hiện tại</th><th>Phần 23–25/12</th></tr>' +
+        ids.filter(function (q) { return D.quan[q] && D.quan[q].tong; }).map(function (q) {
+          var v = v4(q), hh = homCua(v);
+          if (!v) return '<tr><td><b style="color:' + mau(q) + '">' + esc(G.tenQuan(q)) + '</b></td><td colspan="5" style="text-align:left;color:#6b7280">Chưa có bill nào từ khi đổi bản mới</td></tr>';
+          var tuan = v.tuan && v.tuan.wk === wkNay ? v.tuan : { du: 0, phat: 0 };
+          return '<tr style="--c:' + mau(q) + '"><td><b style="color:' + mau(q) + '">' + esc(G.tenQuan(q)) + '</b></td>' +
+            '<td>' + Math.round(hh ? hh.lai : 0).toLocaleString('vi-VN') + 'đ</td>' +
+            '<td>' + o2([hh ? hh.phat : 0, so1(hh ? hh.du : 0)], 1) + '</td><td>' + o2([tuan.phat || 0, so1(tuan.du || 0)], 1) + '</td>' +
+            '<td>' + (v.rho > 0 ? '1 gấu / ~' + Math.round(G.CFG.giaGau / v.rho / 1000) + 'K lãi' : '–') + (hh && hh.x2 ? ' <b style="color:#e2541c">×2 hôm nay</b>' : '') + '</td>' +
+            '<td>' + Math.max(0, v.noel) + ' con' + (v.quy2 ? ' · ' + v.quy2 + ' nhường cho bill 2 ly' : '') + '</td></tr>';
+        }).join('') + '</table></div>' +
+        '<div class="gd4-note" style="margin-top:8px">Dự kiến = lãi nước của ngày × tỉ lệ hiện tại. Tỉ lệ tự chỉnh chậm (tối đa ±' + Math.round(G.CFG.rhoBuoc * 100) + '%/ngày) theo số gấu còn và doanh thu trung bình.</div></div>';
+      // [v4] khách: 15 gần nhất / đã trúng / chưa trúng · lọc thời gian, quán, tên / SĐT
+      var tu7 = G.congNgay(D.hom, -6), loc = String(locSdt || '').trim().toLowerCase(), locSo = G.normPhone(locSdt);
+      var base = D.khach.filter(function (k) {
+        var nd = k.gan ? G.vnDay(Date.parse(k.gan)) : '';
+        if (dsTg === 'hom' && nd !== D.hom) return false;
+        if (dsTg === '7' && !(nd >= tu7)) return false;
+        if (dsQ && !k.luotQuan[dsQ]) return false;
+        if (loc && !((locSo && k.sdt.indexOf(locSo) >= 0) || String(tenCache[k.sdt] || '').toLowerCase().indexOf(loc) >= 0)) return false;
+        return true;
+      }).sort(function (a, b) { return (b.nghi.length - a.nghi.length) || (b.gan > a.gan ? 1 : b.gan < a.gan ? -1 : 0); });
+      var nTrung = base.filter(function (k) { return k.trung; }).length;
+      var ds = dsLoai === 'trung' ? base.filter(function (k) { return k.trung; }) : dsLoai === 'chua' ? base.filter(function (k) { return !k.trung; }) : base;
+      var hien = ds.slice(0, dsLoai === 'gan' ? 15 : dsHien);
+      var nut = function (l, t, n) { return '<button class="gn-btn gn-x' + (dsLoai === l ? ' on' : '') + '" type="button" data-loai="' + l + '">' + t + (n == null ? '' : '<span>' + n + '</span>') + '</button>'; };
+      var opt = function (v, t, cur) { return '<option value="' + v + '"' + (v === cur ? ' selected' : '') + '>' + t + '</option>'; };
+      h += '<div class="gd-card"><h4>Khách tham gia</h4><div class="gd-tools"><div class="gd4-seg">' + nut('gan', '15 gần nhất') + nut('trung', 'Đã trúng', nTrung) + nut('chua', 'Chưa trúng', base.length - nTrung) + '</div>' +
+        '<select data-loc="tg" aria-label="Thời gian">' + opt('hom', 'Hôm nay', dsTg) + opt('7', '7 ngày', dsTg) + opt('all', 'Cả đợt', dsTg) + '</select>' +
+        '<select data-loc="q" aria-label="Quán">' + opt('', 'Mọi quán', dsQ) + ids.map(function (q) { return opt(q, G.tenQuan(q), dsQ); }).join('') + '</select>' +
+        '<input id="gd-loc" placeholder="Tìm tên / SĐT…" value="' + esc(locSdt) + '"></div>' +
+        '<div style="overflow-x:auto"><table><tr><th class="l">Khách</th><th>Lượt</th><th>Chưa quay</th><th>Trúng</th><th>Đã nhận</th><th>Chờ nhận</th><th class="l">Quán</th><th class="l">Ống may mắn</th><th>Gần nhất</th></tr>' +
         (hien.length ? hien.map(function (k) {
-          return '<tr class="' + (k.nghi.length ? 'nghi' : '') + '"><td><b>' + esc(k.sdt) + '</b>' + (k.nghi.length ? '<span class="gd-flag" title="' + esc(k.nghi.join(' · ')) + '">Nghi ngờ</span><div style="font-size:11px;color:#b91c1c;margin-top:2px">' + esc(k.nghi.join(' · ')) + '</div>' : '') + '</td>' +
-            '<td>' + k.luot + '</td><td>' + k.trung + '</td><td><b>' + k.nhan + '</b></td><td>' + k.cho + '</td><td style="text-align:left">' +
-            Object.keys(k.quan).map(function (q) { return '<span class="gd-q" style="background:' + mau(q) + '">' + esc(chuQ(q)) + ' ×' + k.quan[q] + '</span>'; }).join('') + '</td>' +
-            '<td>' + (k.lanCuoi ? esc(new Date(k.lanCuoi).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })) : '–') + '</td></tr>';
-        }).join('') : '<tr><td colspan="7" style="text-align:center;color:#9ca3af;padding:16px">Chưa có khách</td></tr>') + '</table></div>' +
-        (!xemHet && ds.length > 30 ? '<button class="gn-btn gn-x" data-dash="het" style="margin-top:10px">Xem tất cả ' + ds.length + ' SĐT</button>' : '') + '</div>';
+          var ten = tenCache[k.sdt], pc = Math.round(k.ong * 100);
+          return '<tr class="' + (k.nghi.length ? 'nghi' : '') + '"><td class="l"><div class="gd4-ten">' + (ten ? esc(ten) : '<span style="color:#9ca3af">' + (ten === '' ? 'Chưa có tên' : '…') + '</span>') + '<small>' + esc(k.sdt) + '</small></div>' +
+            (k.nghi.length ? '<span class="gd-flag" title="' + esc(k.nghi.join(' · ')) + '">Nghi ngờ</span><div style="font-size:11px;color:#b91c1c;margin-top:2px">' + esc(k.nghi.join(' · ')) + '</div>' : '') + '</td>' +
+            '<td>' + k.luot + '</td><td>' + k.chuaQuay + '</td><td>' + k.trung + '</td><td><b>' + k.nhan + '</b></td><td>' + k.cho + '</td><td class="l">' +
+            Object.keys(k.luotQuan).map(function (q) { return '<span class="gd-q" style="background:' + mau(q) + '">' + esc(chuQ(q)) + ' ×' + k.luotQuan[q] + '</span>'; }).join('') + '</td>' +
+            '<td class="l gd4-ong"><span class="gd-cell"><span class="gd-bar"><i style="width:' + pc + '%"></i></span>' + pc + '%</span></td>' +
+            '<td>' + (k.gan ? esc(new Date(k.gan).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })) : '–') + '</td></tr>';
+        }).join('') : '<tr><td colspan="9" style="text-align:center;color:#9ca3af;padding:16px">Không có khách khớp bộ lọc</td></tr>') + '</table></div>' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px"><small style="color:#6b7280">' +
+        (dsLoai === 'gan' ? '15 khách quay hoặc nhận lượt gần nhất' : 'Đang hiện ' + hien.length + ' / ' + ds.length + ' khách') + '</small>' +
+        (dsLoai !== 'gan' && hien.length < ds.length ? '<button class="gn-btn gn-x" type="button" data-dash="them">Xem thêm 15</button>' : '') + '</div></div>';
+      var canTen = hien.map(function (k) { return k.sdt; }).filter(function (p) { return !(p in tenCache); });
       box.innerHTML = h;
       var bl = box.querySelector('[data-dash=lai]'); if (bl) bl.onclick = function () { veDash(box, true); };
-      var bh = box.querySelector('[data-dash=het]'); if (bh) bh.onclick = function () { xemHet = true; veDashData(box, D); };
-      var il = box.querySelector('#gd-loc'); if (il) il.oninput = function () { locSdt = il.value; var pos = il.selectionStart; veDashData(box, D); var n = box.querySelector('#gd-loc'); if (n) { n.focus(); try { n.setSelectionRange(pos, pos); } catch (e) {} } };
+      var bt = box.querySelector('[data-dash=them]'); if (bt) bt.onclick = function () { dsHien += 15; veDashData(box, D); };
+      Array.prototype.forEach.call(box.querySelectorAll('[data-loai]'), function (b) { b.onclick = function () { dsLoai = b.getAttribute('data-loai'); dsHien = 15; veDashData(box, D); }; });
+      Array.prototype.forEach.call(box.querySelectorAll('select[data-loc]'), function (sl) { sl.onchange = function () { if (sl.getAttribute('data-loc') === 'tg') dsTg = sl.value; else dsQ = sl.value; dsHien = 15; veDashData(box, D); }; });
+      var bc = box.querySelector('[data-dash=chep]'); if (bc) bc.onclick = function () {
+        var el = box.querySelector('[data-x2txt]'), t = el ? el.textContent : '';
+        var chon = function () { try { var g = document.createRange(); g.selectNodeContents(el); var sel = getSelection(); sel.removeAllRanges(); sel.addRange(g); toast('Đã chọn lời thông báo — bấm Ctrl+C để chép'); } catch (e) {} };
+        try { navigator.clipboard.writeText(t).then(function () { toast('✅ Đã chép lời thông báo'); }, chon); } catch (e) { chon(); }
+      };
+      var il = box.querySelector('#gd-loc'); if (il) il.oninput = function () { locSdt = il.value; dsHien = 15; var pos = il.selectionStart; veDashData(box, D); var n = box.querySelector('#gd-loc'); if (n) { n.focus(); try { n.setSelectionRange(pos, pos); } catch (e) {} } };
+      if (canTen.length) G.tenKhach(canTen).then(function (m) { Object.keys(m).forEach(function (p) { tenCache[p] = m[p]; }); if (box.isConnected !== false) veDashData(box, D); }).catch(function () {});
     }
     function ve(docMoi) {   // docMoi: vừa mở tab → đọc dashboard mới (không dùng bản đệm)
       var bat = G.dangBat(), C = G.CFG;
@@ -1101,10 +1359,9 @@
         '<button class="gn-btn gn-x" id="gn-bd-luu">Lưu ngày</button></div></div>' +
         '<button class="gn-btn ' + (bat ? '' : 'gn-g') + '" id="gn-bat" style="padding:12px 22px;font-size:14px;">' + (bat ? 'TẮT chương trình' : 'BẬT chương trình') + '</button></div>' +
         '<div id="gn-dash"></div>' +
-        '<div style="font-weight:900;font-size:15px;margin-top:10px;">Cấu hình kho gấu từng quán</div>' +
-        '<div style="font-size:12.5px;color:#6b7280;line-height:1.6;">Số con tối đa mỗi loại lượt được trúng theo từng chặng (lấy từ trang mô phỏng). Hết kho chặng nào thì loại lượt đó ngừng trúng tới chặng sau. ' +
-        'Lượt chắc trúng (chuỗi trượt đủ lãi, đơn nhiều ly, bed trên 160K) luôn trao tới khi hết «số gấu thật». Quán chưa lưu kho = không bốc.</div>' +
-        '<div id="gn-kho" style="display:flex;flex-direction:column;gap:12px;">Đang tải…</div>' +
+        '<div class="gd-card" id="gn-kho-card"><h4>Kho gấu từng quán</h4><div id="gn-kho" class="gd4-kho">Đang tải…</div>' +
+        '<div class="gd4-note" style="margin-top:10px">Gấu phát theo doanh thu từng ngày tới hết 25/12. Giữ ' + Math.round(C.phanNoel * 100) + '% kho cho 23–25/12; trong 3 ngày đó cứ ' + C.noelChia +
+        ' bill từ ' + C.lyChacNoel + ' ly thì 1 bill nhường gấu cho khách mua 2 ly. Nạp thêm cộng vào phần đang chạy, tỉ lệ tự lên từ hôm sau.</div></div>' +
         '<div style="display:flex;gap:10px;align-items:center;margin-top:6px;"><button class="gn-btn gn-x" id="gn-tk-btn">Tải thống kê</button><span id="gn-tk" style="font-size:13px;color:#374151;"></span></div>' +
         '<div style="margin-top:10px;padding:16px;border-radius:16px;border:1.5px dashed #fca5a5;background:#fff5f5;">' +
         '<div style="font-weight:900;color:#b91c1c;">Xoá toàn bộ dữ liệu Gấu Noel (khi hết đợt)</div>' +
@@ -1149,20 +1406,17 @@
       G.docKho().then(function (all) {
         var ids = ['tc33', 'xofa', 'gg01']; Object.keys(all).forEach(function (k) { if (ids.indexOf(k) < 0) ids.push(k); });
         var box = pane.querySelector('#gn-kho'); box.innerHTML = ids.map(function (id) { return veKho(id, all[id] || {}); }).join('');
-        Array.prototype.forEach.call(box.querySelectorAll('[data-luu]'), function (b) {
+        Array.prototype.forEach.call(box.querySelectorAll('[data-nap],[data-dat]'), function (b) {
           b.onclick = function () {
-            var card = b.closest('[data-quan]'), id = card.getAttribute('data-quan'), cap = {};
-            G.KHO_NGAU.forEach(function (k) { cap[k] = { open: 0, week: 0, p15: 0, pre: 0, n: [0, 0, 0] }; });
-            Array.prototype.forEach.call(card.querySelectorAll('input[data-b]'), function (i) {
-              var v = Math.max(0, Math.round(Number(i.value) || 0)), c = i.getAttribute('data-c'), k = cap[i.getAttribute('data-b')];
-              if (c.charAt(0) === 'n' && c.length === 2) k.n[+c.charAt(1)] = v; else k[c] = v;
+            var card = b.closest('[data-quan]'), id = card.getAttribute('data-quan'), m = card.querySelector('[data-msg]');
+            var dat = b.hasAttribute('data-dat'), inp = card.querySelector(dat ? '[data-tong]' : '[data-nap-so]'), so = Math.round(Number(inp && inp.value) || 0);
+            if (!(so > 0)) { m.textContent = '⚠️ Nhập số gấu lớn hơn 0'; return; }
+            hoi((dat ? 'Nhập kho ' : 'Nạp thêm ') + so + ' gấu cho ' + G.tenQuan(id) + '?').then(function (ok) {
+              if (!ok) return;
+              m.textContent = 'Đang lưu…'; b.disabled = true;
+              (dat ? G.datKho(id, so) : G.napThem(id, so)).then(function () { toast('✅ ' + (dat ? 'Đã nhập kho ' : 'Đã nạp thêm ') + so + ' gấu · ' + G.tenQuan(id)); dashCache = null; ve(true); })
+                .catch(function (e) { b.disabled = false; m.textContent = '❌ ' + ({ 'da-co-kho': 'Quán đã có kho, dùng Nạp thêm', 'chua-co-kho': 'Quán chưa nhập kho' }[e.message] || e.message); });
             });
-            var m = card.querySelector('[data-msg]'), tong = Math.round(Number(card.querySelector('[data-tong]').value) || 0);
-            var tongCap = 0; G.KHO_NGAU.forEach(function (k) { tongCap += cap[k].pre + cap[k].n[0] + cap[k].n[1] + cap[k].n[2]; });
-            if (tong <= 0) { m.textContent = '⚠️ Nhập «Số gấu thật của quán» (> 0) — bằng 0 thì quán không trúng được con nào'; return; }
-            if (tong < tongCap) m.textContent = '⚠️ Số gấu thật (' + tong + ') ít hơn tổng trần kho ngẫu nhiên (' + tongCap + ') — hết gấu thật thì ngừng trúng. Đang lưu…';
-            else m.textContent = 'Đang lưu…';
-            G.luuKho(id, cap, tong).then(function () { m.textContent = (/⚠️/.test(m.textContent) ? m.textContent.replace('Đang lưu…', '') + ' ' : '') + '✅ Đã lưu'; }).catch(function (e) { m.textContent = '❌ ' + e.message; });
           };
         });
       }).catch(function (e) { pane.querySelector('#gn-kho').textContent = 'Lỗi đọc kho: ' + e.message; });
@@ -1276,6 +1530,8 @@
       '#gn-the .gt-luot b{font-size:26px;font-weight:900;color:#fff;line-height:1}#gn-the .gt-luot span{display:block;font-size:12px;color:rgba(220,236,255,.8);margin-top:2px}' +
       '#gn-the .gt-btn,#gn-q .gq-btn{border:none;border-radius:99px;padding:12px 18px;font-weight:900;font-size:13px;cursor:pointer;color:#fff;background:linear-gradient(135deg,#ef4655,#b3162a);box-shadow:0 6px 16px rgba(179,22,42,.35);-webkit-tap-highlight-color:transparent}' +
       '#gn-the .gt-qua{margin-top:12px;display:flex;flex-direction:column;gap:8px;position:relative}' +
+      '#gn-the .gt-ong{margin-top:12px;position:relative;padding:12px 14px;border-radius:18px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.18)}#gn-the .gt-ong-h{display:flex;justify-content:space-between;font-size:12.5px;font-weight:800;color:#fff}' +
+      '#gn-the .gt-ong-bar{height:8px;border-radius:99px;background:rgba(255,255,255,.18);overflow:hidden;margin:8px 0 6px}#gn-the .gt-ong-bar>i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,#f6c453,#ffde8a)}#gn-the .gt-ong small{font-size:11.5px;color:rgba(220,236,255,.8)}' +
       '#gn-the .gt-g{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:18px;background:#fff;color:#0b1d38}#gn-the .gt-g .e{font-size:30px;line-height:1}' +
       '#gn-the .gt-g .t{flex:1;min-width:0}#gn-the .gt-g .t b{display:block;font-size:18px;font-weight:900;letter-spacing:.1em;color:#b3162a}#gn-the .gt-g .t small{display:block;font-size:11.5px;color:#4b5b73;margin-top:2px;line-height:1.4}' +
       '#gn-the .gt-g.used{background:rgba(255,255,255,.1);color:rgba(220,236,255,.7)}#gn-the .gt-g.used .t b{color:rgba(220,236,255,.6);text-decoration:line-through}#gn-the .gt-g.used .t small{color:rgba(220,236,255,.6)}' +
@@ -1306,6 +1562,7 @@
       var cho = thay.filter(function (x) { return !x.used; }), da = thay.filter(function (x) { return x.used; }), n = st.chuaMo.length;
       var h = '<div class="gt-h"><div class="gt-ic">🧸</div><div class="gt-tt"><b>Gấu Noel của bạn</b><small>Mua từ 2 ly, đọc SĐT khi order → nhận lượt quay</small></div><span class="gt-tag">NOEL</span></div>';
       if (n) h += '<div class="gt-luot"><div style="flex:1"><b>' + n + ' lượt</b><span>chưa quay</span></div><button class="gt-btn" data-q="1">Quay ngay</button></div>';
+      if (st.ong > 0) h += '<div class="gt-ong"><div class="gt-ong-h"><span>Tích luỹ may mắn</span><b>' + Math.round(st.ong * 100) + '%</b></div><div class="gt-ong-bar"><i style="width:' + Math.round(st.ong * 100) + '%"></i></div><small>Mỗi lần quay chưa trúng đều được cộng thêm. Đầy 100% thì lượt kế tiếp chắc chắn trúng gấu.</small></div>';
       if (cho.length || da.length) h += '<div class="gt-qua">' + cho.map(function (x) {
         return '<div class="gt-g"><div class="e">🧸</div><div class="t"><b>' + esc(x.code) + '</b><small>1 gấu bông · nhận tại <b style="display:inline;font-size:11.5px;letter-spacing:0;color:#0b1d38">' + esc(G.tenQuan(x.store)) + '</b><br>Đưa mã cho nhân viên · hạn ' + HAN + '</small></div></div>';
       }).join('') + da.map(function (x) {

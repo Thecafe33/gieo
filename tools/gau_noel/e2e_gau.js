@@ -1,6 +1,6 @@
 // E2E Gấu Noel 2026 (trình duyệt thật — cần Playwright + Chromium; không thuộc tests/run_all.sh)
 //   node tools/gau_noel/e2e_gau.js [thư_mục_ảnh]
-// pos.html: tab Quản lý (bật/tắt, kho) → thanh toán thật (saveOrderToFirebase) → popup QR → khung khách → Mở lượt tại quầy → Đổi quà; bed > 160K.
+// pos.html: tab Quản lý (bật/tắt, nhập kho + nạp thêm v4) → thanh toán thật (saveOrderToFirebase) → popup QR → khung khách → Mở lượt tại quầy → Đổi quà; bed > 160K.
 // PosX.html: _loyaltyAfterSave → bốc, màn hình phụ. kiosk.html: QR / Mở lượt tại quầy chiếu từ PosX. posgieo.html: assistFinalizeOrder → bốc, QR cuối bill (buildReceiptContent + renderReceiptCanvas).
 // Firebase giả: tools/tet/e2e/mockfb.js + rtmem.js (RT) và lixi_fake_inpage.js (Firestore của bảng chương trình).
 const { chromium } = require('playwright'); const fs = require('fs'), path = require('path');
@@ -64,10 +64,12 @@ const CHUNG = (fake) => {
     $('gn-bat').click(); await sleep(300);
     chk(G.dangBat() && DB['gau_noel_2026_kho/_cfg'].bat === true && /đang BẬT/.test(pane.textContent), '4. bấm BẬT → ghi _cfg.bat, 3 quán chạy');
     const card = pane.querySelector('[data-quan="tc33"]');
-    card.querySelectorAll('input[data-b]').forEach(i => { i.value = 7; }); card.querySelector('[data-tong]').value = 100;
-    card.querySelector('[data-luu]').click(); await sleep(300);
-    const k = DB['gau_noel_2026_kho/tc33'];
-    chk(k && k.tong === 100 && k.cap.v80.week === 7 && k.cap.low.n[2] === 7, '5. lưu kho The cafe 33 (trần từng kho × chặng + số gấu thật)', k);
+    card.querySelector('[data-tong]').value = 100; card.querySelector('[data-dat]').click(); await sleep(500);
+    let k = DB['gau_noel_2026_kho/tc33'];
+    chk(k && k.tong === 100 && !pane.querySelector('[data-quan="tc33"] [data-tong]') && !!pane.querySelector('[data-quan="tc33"] [data-nap]'), '5. [v4] nhập kho The cafe 33: chỉ 1 ô số gấu → sau đó còn ô «Nạp thêm»', k);
+    pane.querySelector('[data-quan="tc33"] [data-nap-so]').value = 5; pane.querySelector('[data-quan="tc33"] [data-nap]').click(); await sleep(500);
+    k = DB['gau_noel_2026_kho/tc33'];
+    chk(k.tong === 105 && Object.values(k.napLog || {})[0] === 5, '5b. [v4] Nạp thêm 5 gấu → kho 105, có nhật ký nạp', k);
     switchMgrTab('label'); await sleep(100);
     chk(pane.style.display === 'none', '6. sang tab khác → ẩn tab Gấu Noel');
     await window.__shot('gau_tab');
@@ -78,7 +80,7 @@ const CHUNG = (fake) => {
     reset(); addToCart('Bạc xỉu', 'M', 25000); addToCart('Trà đào', 'M', 30000); addToCart('Bánh tráng', 'M', 20000);
     $('kh-sdt').value = P; saveOrderToFirebase('Chuyển khoản'); await sleep(900);
     let d = DB['gau_noel_2026/' + P], ls = d ? Object.values(d.luot) : [];
-    chk(ls.length === 1 && ls[0].ly === 2 && ls[0].tienNuoc === 55000 && ls[0].store === 'tc33', '7. thanh toán 2 ly + ăn vặt → 1 lượt, tiền nước 55K (không tính ăn vặt)', ls);
+    chk(ls.length === 1 && ls[0].ly === 2 && ls[0].tienNuoc === 55000 && ls[0].store === 'tc33' && ls[0].v === 4, '7. thanh toán 2 ly + ăn vặt → 1 lượt, tiền nước 55K (không tính ăn vặt), lượt bản v4', ls);
     const ov = $('gn-ov');
     chk(ov && ov.style.display === 'flex' && /1 lượt quay/.test(ov.textContent) && ov.querySelector('svg path'), '8. popup QR hiện trên POS: "1 lượt quay" + mã QR');
     await window.__shot('gau_popup_qr');
@@ -113,7 +115,10 @@ const CHUNG = (fake) => {
     const dash = $('gn-dash');
     chk(dash && /Dashboard Gấu Noel/.test(dash.textContent) && /Hôm nay đã tặng/.test(dash.textContent) && dash.querySelectorAll('.gd-w').length === 3, '15b. tab Gấu Noel có dashboard: hôm nay đã tặng + 3 thẻ quán', dash && dash.textContent.slice(0, 120));
     const rowP = [...dash.querySelectorAll('table tr')].find(tr => tr.textContent.includes(P));
-    chk(rowP && /Kho từng kịch bản/.test(dash.textContent), '15c. bảng kho từng kịch bản + bảng khách có SĐT vừa nhận gấu', rowP && rowP.textContent);
+    chk(rowP && /Phát theo doanh thu/.test(dash.textContent) && /15 gần nhất/.test(dash.textContent) && !/Kho từng kịch bản/.test(dash.textContent), '15c. [v4] bảng «Phát theo doanh thu» + danh sách khách (15 gần nhất) có SĐT vừa nhận gấu', rowP && rowP.textContent);
+    dash.querySelector('[data-loai=chua]').click(); await sleep(150);
+    chk(![...$('gn-dash').querySelectorAll('table tr')].some(tr => tr.textContent.includes(P)), '15d. [v4] tab «Chưa trúng» không có khách vừa trúng');
+    $('gn-dash').querySelector('[data-loai=gan]').click(); await sleep(150);
     { const sh = document.createElement('div'); sh.style.cssText = 'position:fixed;inset:0;z-index:2147483600;background:#fff;overflow:auto;padding:24px'; sh.appendChild(dash); document.body.appendChild(sh);
       await sleep(100); await window.__shot('gau_dashboard'); sh.remove(); }
     switchMgrTab('label'); await sleep(100);
@@ -240,7 +245,7 @@ const CHUNG = (fake) => {
   R = await p.evaluate(async ([kQr, kKq]) => {
     const R = []; window.__R = R; const chk = (c, m, x) => R.push((c ? 'ok   ' : 'FAIL ') + m + (c || x === undefined ? '' : ' → ' + JSON.stringify(x)));
     const sleep = ms => new Promise(r => setTimeout(r, ms)); const $ = id => document.getElementById(id);
-    if (!window.GauNoel) { chk(false, 'K0. kiosk không nạp được gau_noel_giangsinh.v3.js'); return R; }
+    if (!window.GauNoel) { chk(false, 'K0. kiosk không nạp được gau_noel_giangsinh.v4.js'); return R; }
     const now = o => Object.assign({}, o, { ev: Object.assign({}, o.ev, { at: Date.now() }) });
     chk(!$('gn-k').classList.contains('on') && !$('gn-kb').classList.contains('on'), 'K1. chưa có dữ liệu → không hiện gì');
     await db.ref('gau_noel_2026_kiosk/xofa').set(now(kQr)); await sleep(150);
@@ -275,7 +280,7 @@ const CHUNG = (fake) => {
   ({ p, errs } = await moTrang(b, 'posgieo.html', { width: 1280, height: 800 }));
   R = await p.evaluate(async ([fake, chung]) => {
     const R = []; window.__R = R; const chk = (c, m, x) => R.push((c ? 'ok   ' : 'FAIL ') + m + (c || x === undefined ? '' : ' → ' + JSON.stringify(x)));
-    if (!window.GauNoel) { chk(false, 'G0. trang không nạp được gau_noel_giangsinh.v3.js'); return R; }
+    if (!window.GauNoel) { chk(false, 'G0. trang không nạp được gau_noel_giangsinh.v4.js'); return R; }
     const { cap } = (eval('(' + chung + ')'))(fake);
     const sleep = ms => new Promise(r => setTimeout(r, ms)); const DB = window.__LXFS, G = GauNoel;
     if (window.GieoData) GieoData.storeId = () => 'gg01';
@@ -343,7 +348,7 @@ const CHUNG = (fake) => {
     R = await pg.evaluate(async ([fake]) => {
       const R = []; window.__R = R; const chk = (c, m, x) => R.push((c ? 'ok   ' : 'FAIL ') + m + (c || x === undefined ? '' : ' → ' + JSON.stringify(x)));
       const sleep = ms => new Promise(r => setTimeout(r, ms)); const $ = id => document.getElementById(id);
-      if (!window.GauNoel) { chk(false, 'I0. index_giangsinh không nạp gau_noel_giangsinh.v3.js'); return R; }
+      if (!window.GauNoel) { chk(false, 'I0. index_giangsinh không nạp gau_noel_giangsinh.v4.js'); return R; }
       eval(fake); const F = window.__lxFake, DB = window.__LXFS, G = GauNoel;
       // Firestore giả + nghe doc (onSnapshot)
       const LS = [], oc = F.fstore.collection, ot = F.fstore.runTransaction;
@@ -353,7 +358,7 @@ const CHUNG = (fake) => {
       G.init({ fstore: F.fstore, FieldValue: F.FieldValue }); G._setOffset(Date.parse('2026-11-25T15:00:00+07:00') - Date.now());
       const w = $('welcome-popup'); if (w) { w.classList.add('hidden'); w.style.display = 'none'; }
       const P = '0955000111';
-      DB['gau_noel_2026/' + P] = { sdt: P, luot: {
+      DB['gau_noel_2026/' + P] = { sdt: P, ong: 8000, luot: {
           xofa_b1_0: { store: 'xofa', bill: 'b1', at: '2026-11-25T03:00:00.000Z', win: true, code: 'GAUAB2CD', k: 'v45', w: 'W1', opened: false },
           xofa_b1_1: { store: 'xofa', bill: 'b1', at: '2026-11-25T03:00:00.000Z', win: false, code: '', k: '', w: 'W1', opened: false },
           tc33_b0_0: { store: 'tc33', bill: 'b0', at: '2026-11-20T03:00:00.000Z', win: true, code: 'GAUZZ9YY', k: 'bed', w: 'W0', opened: true } },
@@ -368,6 +373,7 @@ const CHUNG = (fake) => {
       const the = $('gn-the');
       chk(the.style.display === 'block' && /2 lượt/.test(the.textContent) && !/GAUAB2CD/.test(the.textContent) && /GAUZZ9YY/.test(the.textContent) && /Đã nhận/.test(the.textContent), 'I3. thẻ dưới thẻ thành viên: 2 lượt chưa quay; gấu của lượt chưa quay CHƯA lộ mã; gấu đã nhận hiện «Đã nhận»', the.textContent);
       chk(the.previousElementSibling && the.previousElementSibling.classList.contains('card-gradient'), 'I4. thẻ nằm ngay dưới thẻ thành viên');
+      chk(/Tích luỹ may mắn/.test(the.textContent) && /47%/.test(the.textContent), 'I4b. [v4] thẻ có thanh «Tích luỹ may mắn» (ống 8K / 17K = 47%)', the.textContent);
       await window.__shot('gau_khach_popup');
       $('gn-q').querySelector('[data-a=quay]').click(); await sleep(600);
       const xoay = () => { const m = /rotate\(([-\d.]+)deg\)/.exec($('gn-q').querySelector('.gn-vong svg').style.transform); return m ? +m[1] : 0; };

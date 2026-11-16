@@ -1,4 +1,26 @@
-# Gấu Noel 2026 — ghi chú đầu file `gau_noel_giangsinh.v3.js` + hướng dẫn gỡ chương trình
+# Gấu Noel 2026 — luật chơi + hướng dẫn gỡ chương trình
+
+## Bản hiện hành: `gau_noel_giangsinh.v4.js` (16/11)
+
+Phần gắn vào app và cách gỡ chương trình **giữ nguyên như v3** (ghi chú v3 bên dưới; đọc «v3» thành «v4»). Khác v3 ở luật phát gấu:
+
+| | v3 | v4 |
+|---|---|---|
+| Số lượt | 2–3 ly = 1 · 4–5 = 2 · từ 6 = 3 | Như cũ, tính theo cặp 2 ly: bill lẻ bỏ 1 ly giá ở giữa |
+| Mức giá lượt | tổng tiền nước ÷ số lượt, 4 mức cứng | giá 1 cặp; tỉ lệ trúng tỉ lệ thuận với lãi cặp (giá cặp − 17,8K) |
+| Kho | 29 ô: 4 mức × 7 chặng + số gấu thật | 1 số / quán + Nạp thêm (quản lý tự quyết) |
+| Nhịp phát | trần từng chặng + trần «trước 23» | tỉ lệ «gấu / đồng lãi» đặt lại mỗi ngày = gấu còn × 17K ÷ (lãi TB × ngày còn), đổi ≤ ±15%/ngày → gấu theo doanh thu từng ngày, phát hết kho tới 25/12 |
+| Chắc trúng theo khách | trượt 5 lượt + đủ lãi 113K | ống may mắn: mỗi lượt +4% lãi cặp, đủ 17K → chắc trúng (app khách thấy thanh «Tích luỹ may mắn») |
+| 23–25/12 | trần riêng từng ngày, 4 ly chắc trúng | giữ 20% kho; 4 ly vẫn chắc trúng, nhưng cứ 5 bill thì 1 bill nhường gấu cho bill 2 ly |
+| Khuyến mãi tuần | — | tuần trước phát thiếu dự kiến ≥ 3 gấu → Thứ 2 & Thứ 4 tuần này tỉ lệ ×2; tab Gấu báo + lời quảng cáo |
+| Nhịp đông khách | — | chỉ lượt **quay tại quầy**: XOFA 5 / Gieo Gieo 4 bill trong 10 phút, các bill trước đều trượt → bill này chắc trúng (xét lúc mở lượt) |
+| Bill 6 ly, bed 160K | chắc trúng | giữ nguyên |
+
+**Nhận tiếp số liệu v3:** lần đầu v4 bốc lượt cho một quán, gấu còn = `tong − phat` của v3 (mọi gấu v3 đã trúng) → 80% ngày thường, 20% cho 23–25/12; ghi dấu `v4.nhanTu`. Lượt / mã / khách của v3 giữ nguyên, đổi quà và mở lượt như cũ. Huỷ bill có gấu chưa nhận → trả về phần kho đang chạy.
+
+Dữ liệu thêm: `gau_noel_2026_kho/{quán}.v4` (thuong, noel, quy2, rho, laiTB, hom, tuan, boost, nhip…), `napLog`; `gau_noel_2026/{sđt}.ong` (ống may mắn, đồng). Tham số trong `CFG` đầu file (ongR, phanNoel, noelChia, rhoBuoc, nhip, x2Thieu…).
+
+## Ghi chú đầu file v3 (giữ để tra cứu)
 
 Chuyển từ phần chú thích đầu file ngày 10/11 (file JS được app khách nạp nên không để tên file POS / ghi chú nội bộ trong đó). Nội dung nguyên văn:
 
