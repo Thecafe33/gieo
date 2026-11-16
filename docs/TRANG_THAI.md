@@ -1,3 +1,7 @@
+# 16/11 — ĐÍNH CHÍNH: gói `dot_12-11_tru_kho_v22` ĐÃ deploy từ 12/11 (chủ dự án nhớ lại + ảnh thư mục deploy)
+
+Thư mục deploy có `unit_engine.v22.js` + `DANH_SACH.txt` ngày 12/11, kích thước khớp đúng gói 12/11. → **`unit_engine.v22.js`, `gieo_engine2_pos_v5.js`, `unit_engine2_store_v5.js`, `js/posgieo/pos_thanh_toan.v2.js` = ĐÃ PHÁT HÀNH** (sửa tiếp phải lên v23 / v6 / v3). Đã đối chiếu: các file .js này trong repo hiện tại giống hệt gói 12/11 — không có gì bị sửa sau phát hành. Các dòng «CHƯA deploy» của mục 11/11 và 12/11 bên dưới là cũ. **Chưa rõ Functions 12/11 đã deploy chưa** — chờ chủ dự án trả lời. Còn CHƯA deploy: Gấu Noel v4, quanlygieo gộp + sidebar gọn (đều nằm trong gói gộp; file đợt 12/11 trong gói chép đè lại vô hại).
+
 # 16/11 — GÓI GỘP chờ deploy: `giao_file/dot_16-11_GOP_v22_gaunoel_quanly/` (chủ dự án: 3 đợt chưa deploy sẽ deploy MỘT LƯỢT)
 
 Chủ dự án xác nhận 16/11: `dot_12-11_tru_kho_v22`, `dot_16-11_gau_noel_v4`, `dot_16-11_quanly_gon_sidebar` đều CHƯA deploy → gộp thành một gói (Hosting 48 file lấy từ `ban_deploy/giangsinh/` + Functions 8 file = `functions/automation` hiện hành, trùng gói 12/11). **Sửa thêm file nào thuộc ba đợt này trước khi chủ dự án deploy → phải dựng lại gói gộp** (chép lại từ `ban_deploy/giangsinh/` + `functions/automation/`). Sau khi chủ dự án báo đã deploy: cập nhật CLAUDE.md (kho v22, Engine 2 v5, Gấu Noel v4, quanlygieo gộp = đã phát hành → sửa tiếp phải lên bản mới).

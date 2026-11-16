@@ -26,10 +26,10 @@
 
 ## Kho (Unit Engine) & đa cửa hàng
 - **Tem = sự thật**: tồn = Σ tem sealed + Σ `unitBase` tem đang mở; khoản không gắn được → Sổ lệch. Bất biến **B1–B16** (mục 2.1 `docs/KE_HOACH_UNIT_ENGINE_DA_CUA_HANG.md`) — mọi thay đổi phải giữ. POS và Quản lý lệch nhau → theo POS.
-- Engine hiện hành **`unit_engine.v22.js`** (12/11, CHƯA deploy — trên máy chủ vẫn v21; API `docs/UNIT_ENGINE.md`). App không ghi thẳng dữ liệu kho — gọi `UnitEngine.*`.
+- Engine hiện hành **`unit_engine.v22.js`** (ĐÃ deploy 12/11 — chủ dự án xác nhận 16/11; sửa tiếp = v23; API `docs/UNIT_ENGINE.md`). App không ghi thẳng dữ liệu kho — gọi `UnitEngine.*`.
 - Lớp đường dẫn hiện hành **`data_access.v9.js`** (cả posgieo / quanlygieo / manage). Quán hiện tại `gg01` giữ nguyên mọi tên; quán mới = tên + `__{storeId}`. Collection / gốc RT mới → đăng ký `GieoData.REG` (S / C / G / X). Ghi đổi lãi/lỗ ngày cũ tự ghi dấu `pl_dirty_gieogieo`. POS gắn quán bằng mã 6 ký tự — không tự gắn, không bắt nhập lại.
 - NL / BTP đã dùng **không xoá** — «Ngừng sử dụng» (`active:false`).
-- Engine 2 (cấp 6): mặc định TẮT; bản POS đã deploy = `gieo_engine2_pos_v4.js` + `unit_engine2_store_v4.js`. Bản mới CHƯA deploy = `gieo_engine2_pos_v5.js` + `unit_engine2_store_v5.js` + nhịp «cổng tín hiệu» `functions/automation/clock.js` (kế hoạch + số đo `docs/KE_HOACH_TOI_UU_ENGINE2_11-11.md`; đo lại bằng `node tools/automation/engine2_do_tai.js`) — chưa deploy thì còn sửa tại chỗ được, sau deploy = v6. Lộ trình duy nhất `docs/LO_TRINH_ENGINE2_CAP6.md`, chi tiết `docs/ENGINE2_POS_V3_05-11.md`.
+- Engine 2 (cấp 6): mặc định TẮT; bản POS đã deploy 12/11 (cùng gói kho v22) = `gieo_engine2_pos_v5.js` + `unit_engine2_store_v5.js` (+ `js/posgieo/pos_thanh_toan.v2.js`); nhịp «cổng tín hiệu» `functions/automation/clock.js` thuộc Functions cùng gói — **chưa rõ chủ dự án đã deploy Functions 12/11 chưa, hỏi trước khi coi là đã chạy** (kế hoạch + số đo `docs/KE_HOACH_TOI_UU_ENGINE2_11-11.md`; đo lại bằng `node tools/automation/engine2_do_tai.js`) — đã deploy nên sửa tiếp = v6. Lộ trình duy nhất `docs/LO_TRINH_ENGINE2_CAP6.md`, chi tiết `docs/ENGINE2_POS_V3_05-11.md`.
 
 ## Việc TC33 đã chốt (được sửa `index.html` / `pos.html` / `manage.html`)
 - CK TC33 = luồng VietQR như posgieo, không PayOS. Chi tiết các việc cũ: `docs/luu_tru/CLAUDE_MD_DAY_DU_27-10-2026.md`.
@@ -41,7 +41,7 @@
 
 ## Kế hoạch & tài liệu
 - **Đọc trước tiên: `docs/TRANG_THAI.md`** (bản hiện hành, việc còn mở, bản đồ tài liệu).
-- **Gói chờ deploy (16/11)**: `giao_file/dot_16-11_GOP_v22_gaunoel_quanly/` gộp 3 đợt chưa deploy (kho v22 + Engine 2 v5, Gấu Noel v4, quanlygieo gộp) — chủ dự án deploy một lượt. Sửa file thuộc gói → dựng lại gói gộp từ `ban_deploy/giangsinh/`.
+- **Gói chờ deploy (16/11)**: `giao_file/dot_16-11_GOP_v22_gaunoel_quanly/` gồm 2 đợt CHƯA deploy (Gấu Noel v4, quanlygieo gộp) + file đợt 12/11 đã deploy (chép đè lại vô hại, JS giống hệt) — chủ dự án deploy một lượt. Sửa file thuộc gói → dựng lại gói gộp từ `ban_deploy/giangsinh/`.
 - Tách posgieo thành `js/posgieo/*.vN.js`: `docs/KE_HOACH_TACH_POSGIEO_DA_CUA_HANG.md` — chỉ chuyển nguyên văn, ưu tiên luồng bán trơn tru.
 - Bản theo mùa: Giáng sinh đang chạy; Tết 2027 (`docs/LIXI_TET_2027.md`). Gấu Noel `gau_noel_giangsinh.v4.js` (16/11, CHƯA deploy — trên máy chủ v3 đang chạy thật; v4 phát theo doanh thu, tự nhận tiếp số đã phát của v3; còn sửa tại chỗ được, sau deploy = v5; luật v4 + hướng dẫn gỡ: `docs/HUONG_DAN_GAU_NOEL.md`). Chế độ thử `docs/CHE_DO_THU.md` — app thật không bao giờ nạp `che_do_thu`.
 - Giao diện quanlygieo: dáng theo manage, **giữ màu hồng `#E23A5D`** (`docs/GIAO_DIEN_QUANLY.md`).
