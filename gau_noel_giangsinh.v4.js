@@ -681,6 +681,7 @@
     catBill: catBill, congNgay: cong, khoV4: khoV4, sangNgay: sangNgay, bocThuan4: bocThuan4, duocNhip: duocNhip, ghiNhip: ghiNhip, tuanCua: tuanCua, datKho: datKho, napThem: napThem, tenKhach: tenKhach,
     docKhach: function (p) { return refKhach(p); },
     luuKho: luuKho, docKho: docKho, NGHI: NGHI, tongHop: tongHop, khoKichBan: khoKichBan, dashboard: dashboard, thongKe: thongKe, xoaHet: xoaHet,
+    _coFS: function () { return !!FS; },
     _setOffset: function (v) { offset = v; }
   };
   root.GauNoel = GauNoel;
@@ -692,7 +693,7 @@
   'use strict';
   if (typeof document === 'undefined' || !window.GauNoel) return;
   var me = document.currentScript, APP = me && me.getAttribute('data-quan');
-  if (!APP || ['tc33', 'xofa', 'gieo', 'kiosk', 'khach'].indexOf(APP) < 0) return;
+  if (!APP || ['tc33', 'xofa', 'gieo', 'kiosk', 'khach', 'manage'].indexOf(APP) < 0) return;
   var G = window.GauNoel, URL_KHACH = 'https://the-cafe-33.web.app';
   // QR tĩnh dẫn tới URL_KHACH (29×29, mức M — dựng sẵn bằng qrcode-generator, không cần thư viện lúc chạy)
   var QR_N = 29, QR_PATH = 'M0 0h7v1h-7zM11 0h1v1h-1zM15 0h2v1h-2zM18 0h3v1h-3zM22 0h7v1h-7zM0 1h1v1h-1zM6 1h1v1h-1zM9 1h1v1h-1zM11 1h2v1h-2zM17 1h2v1h-2zM20 1h1v1h-1zM22 1h1v1h-1zM28 1h1v1h-1zM0 2h1v1h-1zM2 2h3v1h-3zM6 2h1v1h-1zM8 2h5v1h-5zM14 2h1v1h-1zM16 2h1v1h-1zM18 2h1v1h-1zM20 2h1v1h-1zM22 2h1v1h-1zM24 2h3v1h-3zM28 2h1v1h-1zM0 3h1v1h-1zM2 3h3v1h-3zM6 3h1v1h-1zM8 3h1v1h-1zM12 3h1v1h-1zM16 3h3v1h-3zM22 3h1v1h-1zM24 3h3v1h-3zM28 3h1v1h-1zM0 4h1v1h-1zM2 4h3v1h-3zM6 4h1v1h-1zM8 4h2v1h-2zM11 4h5v1h-5zM17 4h4v1h-4zM22 4h1v1h-1zM24 4h3v1h-3zM28 4h1v1h-1zM0 5h1v1h-1zM6 5h1v1h-1zM8 5h1v1h-1zM13 5h5v1h-5zM20 5h1v1h-1zM22 5h1v1h-1zM28 5h1v1h-1zM0 6h7v1h-7zM8 6h1v1h-1zM10 6h1v1h-1zM12 6h1v1h-1zM14 6h1v1h-1zM16 6h1v1h-1zM18 6h1v1h-1zM20 6h1v1h-1zM22 6h7v1h-7zM8 7h1v1h-1zM10 7h1v1h-1zM13 7h1v1h-1zM15 7h1v1h-1zM18 7h3v1h-3zM0 8h1v1h-1zM2 8h5v1h-5zM11 8h1v1h-1zM14 8h2v1h-2zM17 8h1v1h-1zM20 8h1v1h-1zM22 8h5v1h-5zM0 9h1v1h-1zM2 9h1v1h-1zM4 9h2v1h-2zM8 9h2v1h-2zM15 9h2v1h-2zM18 9h7v1h-7zM28 9h1v1h-1zM1 10h2v1h-2zM4 10h1v1h-1zM6 10h1v1h-1zM8 10h1v1h-1zM10 10h1v1h-1zM12 10h1v1h-1zM18 10h1v1h-1zM21 10h1v1h-1zM23 10h2v1h-2zM1 11h3v1h-3zM12 11h1v1h-1zM14 11h1v1h-1zM16 11h1v1h-1zM19 11h2v1h-2zM22 11h2v1h-2zM25 11h1v1h-1zM27 11h1v1h-1zM2 12h1v1h-1zM6 12h2v1h-2zM9 12h1v1h-1zM12 12h1v1h-1zM16 12h2v1h-2zM19 12h1v1h-1zM25 12h2v1h-2zM1 13h2v1h-2zM4 13h1v1h-1zM8 13h1v1h-1zM10 13h1v1h-1zM13 13h3v1h-3zM19 13h1v1h-1zM21 13h2v1h-2zM24 13h1v1h-1zM28 13h1v1h-1zM0 14h2v1h-2zM3 14h6v1h-6zM10 14h2v1h-2zM13 14h4v1h-4zM18 14h1v1h-1zM20 14h2v1h-2zM23 14h4v1h-4zM1 15h1v1h-1zM3 15h1v1h-1zM9 15h5v1h-5zM15 15h1v1h-1zM18 15h2v1h-2zM23 15h2v1h-2zM27 15h1v1h-1zM0 16h2v1h-2zM5 16h3v1h-3zM10 16h3v1h-3zM14 16h2v1h-2zM17 16h1v1h-1zM20 16h1v1h-1zM25 16h2v1h-2zM0 17h5v1h-5zM7 17h1v1h-1zM9 17h1v1h-1zM12 17h1v1h-1zM15 17h2v1h-2zM19 17h1v1h-1zM21 17h4v1h-4zM26 17h1v1h-1zM28 17h1v1h-1zM0 18h1v1h-1zM3 18h1v1h-1zM5 18h4v1h-4zM11 18h1v1h-1zM18 18h1v1h-1zM20 18h1v1h-1zM24 18h1v1h-1zM26 18h1v1h-1zM0 19h1v1h-1zM2 19h2v1h-2zM8 19h2v1h-2zM14 19h1v1h-1zM16 19h1v1h-1zM18 19h2v1h-2zM21 19h2v1h-2zM27 19h1v1h-1zM0 20h1v1h-1zM2 20h3v1h-3zM6 20h1v1h-1zM10 20h1v1h-1zM16 20h1v1h-1zM18 20h1v1h-1zM20 20h5v1h-5zM26 20h3v1h-3zM8 21h2v1h-2zM13 21h3v1h-3zM17 21h4v1h-4zM24 21h5v1h-5zM0 22h7v1h-7zM9 22h1v1h-1zM12 22h6v1h-6zM19 22h2v1h-2zM22 22h1v1h-1zM24 22h3v1h-3zM0 23h1v1h-1zM6 23h1v1h-1zM8 23h1v1h-1zM10 23h4v1h-4zM15 23h1v1h-1zM17 23h2v1h-2zM20 23h1v1h-1zM24 23h1v1h-1zM28 23h1v1h-1zM0 24h1v1h-1zM2 24h3v1h-3zM6 24h1v1h-1zM8 24h2v1h-2zM11 24h1v1h-1zM14 24h2v1h-2zM20 24h5v1h-5zM26 24h3v1h-3zM0 25h1v1h-1zM2 25h3v1h-3zM6 25h1v1h-1zM8 25h3v1h-3zM13 25h1v1h-1zM15 25h2v1h-2zM18 25h2v1h-2zM25 25h2v1h-2zM0 26h1v1h-1zM2 26h3v1h-3zM6 26h1v1h-1zM8 26h2v1h-2zM11 26h1v1h-1zM13 26h2v1h-2zM18 26h10v1h-10zM0 27h1v1h-1zM6 27h1v1h-1zM9 27h2v1h-2zM14 27h1v1h-1zM16 27h1v1h-1zM20 27h1v1h-1zM24 27h2v1h-2zM27 27h1v1h-1zM0 28h7v1h-7zM8 28h2v1h-2zM13 28h2v1h-2zM16 28h1v1h-1zM18 28h1v1h-1zM23 28h4v1h-4z';
@@ -764,8 +765,8 @@
   if (APP === 'kiosk') { ganKiosk(); return; }
   var fs0 = null, db0 = null;
   try { fs0 = fstore; db0 = db; } catch (e) { /* app không có fstore/db toàn cục */ }
-  if (!fs0) { console.warn('[gấu] không thấy fstore'); return; }
-  G.init({ fstore: fs0, db: db0, FieldValue: window.firebase && firebase.firestore && firebase.firestore.FieldValue });
+  if (!fs0 && APP !== 'manage') { console.warn('[gấu] không thấy fstore'); return; }   // manage: kết nối sau khi đăng nhập → nối lúc mở tab
+  if (fs0) G.init({ fstore: fs0, db: db0, FieldValue: window.firebase && firebase.firestore && firebase.firestore.FieldValue });
   if (APP === 'khach') { ganKhach(fs0); return; }
   function store() {
     if (APP !== 'gieo') return APP;
@@ -981,6 +982,30 @@
   }
 
   // ── The cafe 33 ──
+  // ── manage (quản lý TC33 – XOFA): mục «Gấu Noel» — cùng tab Quản lý của pos The cafe 33 ──
+  // App quản lý chỉ cần: thêm G.manageNav vào menu, gọi G.manageView() khi vẽ mục 'gaunoel' rồi G.manageMount().
+  if (APP === 'manage') {
+    var mVe = null, mNoi = function () {
+      if (G._coFS && G._coFS()) return true;
+      var f = null, d = null; try { f = fstore; d = db; } catch (e) {}
+      // app quản lý giữ kết nối trong phạm vi riêng → dùng kết nối mặc định của trang (cùng một app Firebase)
+      try { if (!f && window.firebase && firebase.apps && firebase.apps.length) { f = firebase.firestore(); d = firebase.database ? firebase.database() : null; } } catch (e) {}
+      if (!f) return false;
+      G.init({ fstore: f, db: d, FieldValue: window.firebase && firebase.firestore && firebase.firestore.FieldValue });
+      G.ngheCfg(function () { if (mVe && $('mgr-c-gaunoel')) mVe(); });
+      G.docCfg().then(function () { if (mVe && $('mgr-c-gaunoel')) mVe(); }).catch(function () {});
+      return true;
+    };
+    G.manageNav = ['gaunoel', 'gift', 'Gấu Noel'];
+    G.manageView = function () { return '<div id="gn-manage" style="padding-bottom:110px"><div style="color:#6b7280;font-size:13px">Đang tải Gấu Noel…</div></div>'; };
+    G.manageMount = function () {
+      var el = $('gn-manage'); if (!el) return;
+      if (!mNoi()) { setTimeout(G.manageMount, 500); return; }
+      mVe = ganTabQuanLy(el); if (mVe) mVe(true);
+    };
+    return;
+  }
+
   if (APP === 'tc33') {
     var cho = null;
     function laAnVat(c) {
@@ -1168,18 +1193,23 @@
   G.ngheCfg(function () { if (nutSdb) nutSdb.classList.toggle('on', G.dangNhan()); if (!G.dangNhan()) { anPanel(); dongOv(); } });
 
   // ── Quản lý → «Gấu Noel» ──
-  function ganTabQuanLy() {
+  // host: khung có sẵn (manage) → vẽ tab vào đó, không tạo nút / không bọc switchMgrTab. Trả hàm ve(docMoi).
+  function ganTabQuanLy(host) {
     function mkBtn(src, id) {
       if (!src) return null;
       var b = src.cloneNode(false); b.id = id; b.removeAttribute('onclick'); b.onclick = function () { window.switchMgrTab('gaunoel'); };
       b.textContent = '🧸 Gấu Noel'; b.style.background = 'transparent'; b.style.color = '#6b7280'; b.style.boxShadow = 'none';
       src.parentNode.insertBefore(b, src.nextSibling); return b;
     }
-    var tabBtn = mkBtn($('mgr-tab-label'), 'mgr-tab-gaunoel'), tabMob = mkBtn($('mgr-mob-tab-label'), 'mgr-mob-tab-gaunoel');
-    var colC = $('mgr-col-c'); if (!colC) return;
-    var pane = document.createElement('div'); pane.id = 'mgr-c-gaunoel';
-    pane.style.cssText = 'display:none;flex-direction:column;flex:1;overflow:auto;min-height:0;padding:20px;gap:14px;';
-    colC.appendChild(pane);
+    var tabBtn = null, tabMob = null, pane = null;
+    if (host) { pane = host; pane.id = 'mgr-c-gaunoel'; pane.style.cssText = 'display:flex;flex-direction:column;gap:14px;'; }
+    else {
+      tabBtn = mkBtn($('mgr-tab-label'), 'mgr-tab-gaunoel'); tabMob = mkBtn($('mgr-mob-tab-label'), 'mgr-mob-tab-gaunoel');
+      var colC = $('mgr-col-c'); if (!colC) return;
+      pane = document.createElement('div'); pane.id = 'mgr-c-gaunoel';
+      pane.style.cssText = 'display:none;flex-direction:column;flex:1;overflow:auto;min-height:0;padding:20px;gap:14px;';
+      colC.appendChild(pane);
+    }
     // [v4] kho mỗi quán chỉ còn: tổng gấu, đã phát (gồm cả số bản cũ), nạp thêm (quản lý tự quyết)
     function veKho(id, k) {
       var tong = Number(k.tong) || 0, phat = Number(k.phat) || 0, doi = Number(k.doi) || 0, v = k.v4;
@@ -1246,7 +1276,8 @@
       document.head.appendChild(c);
     }
     function so1(x) { x = Number(x) || 0; return Math.round(x * 10) / 10; }
-    function o2(a, deu) {   // deu: bảng phát theo doanh thu — vượt dự kiến không tô đỏ var x = a[0], y = a[1], pc = y ? Math.min(100, Math.round(x * 100 / y)) : 0;
+    // deu: bảng phát theo doanh thu — vượt dự kiến không tô đỏ
+    function o2(a, deu) { var x = a[0], y = a[1], pc = y ? Math.min(100, Math.round(x * 100 / y)) : 0;
       return '<span class="gd-cell">' + x + '/' + String(y).replace('.', ',') + '<span class="gd-bar' + (!deu && y && x >= y ? ' het' : '') + '"><i style="width:' + pc + '%"></i></span></span>'; }
     function veDash(box, ep) {
       if (!box) return; napCss();
@@ -1421,6 +1452,7 @@
         });
       }).catch(function (e) { pane.querySelector('#gn-kho').textContent = 'Lỗi đọc kho: ' + e.message; });
     }
+    if (host) return ve;
     boc('switchMgrTab', function (cu) {
       return function (tab) {
         var on = tab === 'gaunoel';
