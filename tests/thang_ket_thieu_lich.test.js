@@ -4,7 +4,7 @@
 const fs = require('fs'), path = require('path');
 const ROOT = path.resolve(__dirname, '..');
 let bad = 0; const ok = (c, m) => { console.log((c ? 'ok ' : 'FAIL ') + m); if (!c) bad++; };
-for (const f of ['quanlygieo.html', 'quanlygieo2.html']) {
+for (const f of ['quanlygieo.html']) {
   const s = fs.readFileSync(path.join(ROOT, f), 'utf8');
   const i = s.indexOf('async function renderThangKet(force=false){'), j = s.indexOf('// Báo cáo điều hành', i);
   const body = s.slice(i, j);

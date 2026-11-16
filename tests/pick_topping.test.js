@@ -112,7 +112,7 @@ function make() {
   ok(/c\.freeTpApplied \|\| c\.pickTpApplied/.test(html), 'mergePlainCartLines không gộp ly đã chọn');
   const ql = fs.readFileSync(path.join(ROOT, 'quanlygieo.html'), 'utf8');
   ok(/data\.pickTopping = \{ n, toppingIds: ids \}/.test(ql) && /pickTopping: normPickToppingCfg\(val\.pickTopping\)/.test(ql), 'quanlygieo: lưu + đọc pickTopping');
-  for (const f of ['quanlygieo2.html', 'ban_deploy/thuong/posgieo.html', 'ban_deploy/thuong/quanlygieo2.html']) {
+  for (const f of ['quanlygieo.html', 'ban_deploy/thuong/posgieo.html', 'ban_deploy/thuong/quanlygieo.html']) {
     const t = fs.readFileSync(path.join(ROOT, f), 'utf8');
     ok(/pickTopping|pos_pick_topping/.test(t), f + ' đã sinh lại có tính năng');
   } }

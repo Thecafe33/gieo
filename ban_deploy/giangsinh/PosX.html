@@ -452,15 +452,16 @@ body{font-family:'Google Sans',sans-serif;background:var(--bg);max-width:430px;m
 <div class="ov" id="ov" onclick="closeSdb()"></div>
 <div class="sdb" id="sdb">
   <div style="position:absolute;top:16px;right:16px;display:flex;align-items:center;gap:8px;">
-    <button id="sdb-update-btn" onclick="manualCheckUpdate(this)" title="Kiểm tra cập nhật" style="display:flex;align-items:center;gap:6px;background:#e8f5ee;border:none;border-radius:12px;padding:8px 10px;cursor:pointer;transition:background .15s;">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#1a4a2e" stroke-width="2.5" stroke-linecap="round"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.36-3.36L23 10M1 14l5.13 4.36A9 9 0 0020.49 15"/></svg>
-      <span id="sdb-update-label" style="font-size:12px;font-weight:700;color:#1a4a2e;white-space:nowrap;">Cập nhật</span>
+    <!-- [IN TEM NIIMBOT] Nút Máy in (thay nút «Cập nhật» cũ) — mở bảng kết nối máy in tem B1; chấm xanh = đã kết nối -->
+    <button id="sdb-print-btn" onclick="closeSdb();moMayInTem()" title="Máy in tem" style="display:flex;align-items:center;gap:6px;background:#e8f5ee;border:none;border-radius:12px;padding:8px 10px;cursor:pointer;transition:background .15s;">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#1a4a2e" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9V3h12v6M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><path d="M6 14h12v7H6z"/></svg>
+      <span style="font-size:12px;font-weight:700;color:#1a4a2e;white-space:nowrap;">Máy in</span>
+      <i id="sdb-print-dot" style="width:8px;height:8px;border-radius:50%;background:#c4c4c4;flex-shrink:0;"></i>
     </button>
     <button class="sdc" onclick="closeSdb()" style="position:static;">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#666" stroke-width="2.5" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
     </button>
   </div>
-  <span id="sdb-update-sub" style="display:none;"></span>
   <div class="sdm" style="padding-top: 24px;">
     <div class="sdi" onclick="closeSdb();showScreen('rv')">
       <div class="sdic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none"><rect x="3" y="12" width="4" height="9" rx="1" fill="#1e6b3c"/><rect x="10" y="7" width="4" height="14" rx="1" fill="#1e6b3c"/><rect x="17" y="3" width="4" height="18" rx="1" fill="#1e6b3c" opacity=".5"/></svg></div>
@@ -2995,44 +2996,19 @@ function showScreen(id) {
 }
 function openSdb() { document.getElementById('sdb').classList.add('open'); document.getElementById('ov').classList.add('show'); }
 function closeSdb() { document.getElementById('sdb').classList.remove('open'); document.getElementById('ov').classList.remove('show'); }
-function manualCheckUpdate(btn) {
-  const label = document.getElementById('sdb-update-label');
-  const reset = (txt) => {
-    btn.style.opacity = '1';
-    btn.style.pointerEvents = 'auto';
-    label.textContent = txt || 'Cập nhật';
-    setTimeout(() => { label.textContent = 'Cập nhật'; }, 3000);
-  };
-  if (!('serviceWorker' in navigator)) { reset('Không hỗ trợ'); return; }
-  label.textContent = '...';
-  btn.style.opacity = '0.6';
-  btn.style.pointerEvents = 'none';
-  navigator.serviceWorker.getRegistration().then(reg => {
-    if (!reg) { reset('Chưa cài'); return; }
-    let found = false;
-    const onUpdateFound = () => {
-      found = true;
-      const newSW = reg.installing;
-      label.textContent = '⬇ Đang tải...';
-      if (!newSW) return;
-      newSW.addEventListener('statechange', () => {
-        if (newSW.state === 'activated') {
-          label.textContent = '✅ Xong!';
-          setTimeout(() => window.location.reload(true), 800);
-        }
-      });
-    };
-    reg.addEventListener('updatefound', onUpdateFound);
-    reg.update().then(() => {
-      setTimeout(() => {
-        reg.removeEventListener('updatefound', onUpdateFound);
-        if (!found) reset('✅ Mới nhất');
-      }, 500);
-    }).catch(() => {
-      reg.removeEventListener('updatefound', onUpdateFound);
-      reset('❌ Lỗi mạng');
-    });
-  });
+// [IN TEM NIIMBOT] Máy in tem B1 (in_tem_niimbot.v1.js). Mọi lời gọi đều bọc try — in tem không bao giờ chặn / làm hỏng luồng bán.
+function moMayInTem() {
+  if (window.NiimTem) NiimTem.mo(); else toast('⚠ Chưa tải được bộ in tem — kiểm tra mạng rồi tải lại trang');
+}
+// In tem cho đơn vừa lưu (mỗi ly một tem). Số đơn = thứ tự đơn trong ngày trên máy này (PosX không có mã bill).
+function inTemSauThanhToan(order, orderId) {
+  try {
+    if (!window.NiimTem || !order) return;
+    let stt = 0;
+    try { stt = orders.filter(o => o && o.date === order.date && o.id !== orderId).length + 1; } catch (_) {}
+    const soDon = stt > 0 ? '#' + String(stt).padStart(3, '0') : '#' + String(order.time || '').replace(':', '');
+    NiimTem.inDon(order, { soDon });
+  } catch (e) { console.warn('[tem] bỏ qua in tem', e); }
 }
 
 // ============================================================
@@ -4792,6 +4768,7 @@ function confirmPay(cashGiven, cashChange) {
     // KHÔNG thêm thủ công vào orders[] — RT listener child_added tự xử lý (có guard duplicate).
 
     // Tích điểm / tem, trừ ly tem — SAU KHI order lưu thành công, tuần tự [G2.6, G4.2]
+    inTemSauThanhToan(order, ref.key); // [IN TEM NIIMBOT] không await — không chặn luồng bán
     _loyaltyAfterSave(items, total, ref.key); // [GẤU NOEL] mã bill = khoá đơn vừa lưu (phần gắn Gấu Noel đọc tham số thứ 3; thiếu → không bốc được lượt)
 
     _finalizeDiscountAfterPay().then(() => {
@@ -6381,6 +6358,7 @@ function _actualFinalizeSplitPay() {
     // [FIX G4.2] KHÔNG thêm thủ công vào orders[] — RT listener child_added tự xử lý (có guard trùng).
     // Trước đây unshift thủ công + listener cùng thêm → đơn hiện 2 lần, doanh thu nhân đôi trong phiên.
     // Tích điểm / tem như đơn thường (trước đây Tính riêng bỏ qua tích tem).
+    inTemSauThanhToan(order, ref.key); // [IN TEM NIIMBOT] không await — không chặn luồng bán
     _loyaltyAfterSave(items, total, ref.key); // [GẤU NOEL] mã bill — như confirmPay
     cart = {};
     dgDiscountAmt = 0; togoDiscountAmt = 0;
@@ -7220,7 +7198,11 @@ function resetPayMethod() {
   }, true);
 })();
 </script>
+<!-- [IN TEM NIIMBOT] máy in tem B1 qua Bluetooth: thư viện giao thức + bộ in tem ly. Nút mở: ☰ ▸ Máy in -->
+<script src="niimbluelib.v1.js" defer></script>
+<script src="in_tem_niimbot.v1.js" defer></script>
+<script>window.addEventListener('DOMContentLoaded', function(){ try { if (window.NiimTem) NiimTem.init({ quan: 'XOFA', toast: toast, cham: 'sdb-print-dot' }); } catch (e) { console.warn('[tem] init', e); } });</script>
 <!-- [GẤU NOEL 2026] quay trúng gấu Giáng sinh — bật/tắt ở Quản lý › Gấu Noel của POS TC33. Hết đợt: xem docs/HUONG_DAN_GAU_NOEL.md -->
-<script src="gau_noel_giangsinh.v3.js" data-quan="xofa"></script>
+<script src="gau_noel_giangsinh.v4.js" data-quan="xofa"></script>
 </body>
 </html>

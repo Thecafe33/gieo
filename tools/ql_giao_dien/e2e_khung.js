@@ -43,8 +43,12 @@ const server=require('http').createServer((req,res)=>{
   chk(!(await p.evaluate(()=>document.getElementById('sidebar').classList.contains('open'))),'phone: bấm nền → đóng menu');
   // chọn mục menu → sang màn
   await p.click('#bottomNav button:nth-child(4)'); await p.waitForTimeout(400);
-  await p.click('#sidebarNav .sidebar-item:has-text("Khách hàng")'); await p.waitForTimeout(700);
-  chk(await p.evaluate(()=>document.getElementById('screen-customer').classList.contains('active')),'phone: menu → Khách hàng');
+  // [GỌN SIDEBAR 16/11] Báo cáo còn một dòng trên menu; màn con đi bằng thanh tab báo cáo sẵn có.
+  await p.click('#sidebarNav .sidebar-item:has-text("Báo cáo")'); await p.waitForTimeout(700);
+  chk(await p.evaluate(()=>document.getElementById('screen-health').classList.contains('active')),'phone: menu → Báo cáo mở Sức khỏe tài chính');
+  await p.click('#screen-health .report-subnav button:has-text("Khách hàng")'); await p.waitForTimeout(700);
+  chk(await p.evaluate(()=>document.getElementById('screen-customer').classList.contains('active')),'phone: thanh tab báo cáo → Khách hàng');
+  chk(await p.evaluate(()=>{const a=document.querySelector('#sidebarNav .sidebar-item.active');return !!a&&a.textContent.trim()==='Báo cáo'}),'phone: đứng ở Khách hàng → dòng «Báo cáo» sáng');
   chk(await p.evaluate(()=>document.querySelector('#bottomNav button.active span').textContent)==='Thêm','phone: ở màn khác → "Thêm" sáng');
   // không tràn ngang
   chk(await p.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+1),'phone: không cuộn ngang');
@@ -126,8 +130,28 @@ const server=require('http').createServer((req,res)=>{
   chk(r1<=0,'desktop: sidebar ẩn hẳn ra ngoài '+r1);
   await p.click('#hamburgerBtn'); await p.waitForTimeout(500);
   chk(!(await p.evaluate(()=>document.documentElement.classList.contains('nav-off'))),'desktop: ☰ hiện lại');
+  // [GỌN SIDEBAR 16/11] số dòng, nhóm gập «Ít dùng», dòng Kho gộp + thanh tab Kho, mục đã bỏ.
+  const rows=()=>p.evaluate(()=>[...document.querySelectorAll('#sidebarNav .sidebar-item')].map(e=>e.textContent.trim()));
+  let rw=await rows();
+  chk(rw.length===21&&rw[rw.length-1]==='Ít dùng','desktop: sidebar 20 mục + nhóm «Ít dùng» ('+rw.length+')');
+  chk(!rw.includes('Tổng kết tháng')&&!rw.includes('Kiểm kê')&&!rw.includes('Dọn dữ liệu'),'desktop: màn con / mục ít dùng không nằm phẳng trên sidebar');
+  await p.click('#sidebarNav .sidebar-head'); await p.waitForTimeout(300); rw=await rows();
+  chk(rw.length===35&&rw.includes('Dọn dữ liệu')&&rw.includes('Kiểm toán'),'desktop: mở «Ít dùng» → 14 mục ('+rw.length+')');
+  await p.click('#sidebarNav .sidebar-item:has-text("Dọn dữ liệu")'); await p.waitForTimeout(600);
+  chk(await p.evaluate(()=>currentNavKey()==='entry:dondep'&&document.getElementById('hdrTitle').textContent==='Dọn dữ liệu'),'desktop: «Ít dùng» → Dọn dữ liệu mở đúng màn');
+  await p.click('#sidebarNav .sidebar-head'); await p.waitForTimeout(300);
+  chk(await p.evaluate(()=>{const h=document.querySelector('#sidebarNav .sidebar-head');return h.classList.contains('active')&&!!h.querySelector('.sb-here')}),'desktop: gập lại khi đang ở trong nhóm → đầu nhóm sáng');
+  await p.click('#sidebarNav .sidebar-item:has-text("Kho · Hằng ngày")'); await p.waitForTimeout(900);
+  chk(await p.evaluate(()=>currentNavKey()==='kho2:dash'),'desktop: «Kho · Hằng ngày» → Tổng quan');
+  chk(await p.evaluate(()=>[...document.querySelectorAll('#entryBody .k2-nav button')].map(b=>b.textContent.trim()).join('|'))==='Tổng quan|Đặt & nhận hàng|Kiểm kê|Refill & vị trí','desktop: thanh tab Kho đủ 4 màn');
+  await p.click('#entryBody .k2-nav button:has-text("Kiểm kê")'); await p.waitForTimeout(900);
+  chk(await p.evaluate(()=>currentNavKey()==='kho:stockcount'&&document.querySelector('#sidebarNav .sidebar-item.active').textContent.trim()==='Kho · Hằng ngày'),'desktop: sang Kiểm kê bằng tab → dòng «Kho · Hằng ngày» vẫn sáng');
+  chk(await p.evaluate(()=>!NAV_SECTIONS.flatMap(s=>s.items).some(i=>i.key==='sim'||i.key==='entry:ops')),'desktop: Mô phỏng + Ghi chú ngày đã bỏ khỏi menu');
   await p.keyboard.press('Control+k'); await p.waitForTimeout(200);
   chk(await p.evaluate(()=>document.activeElement&&document.activeElement.id==='navSearch'),'desktop: Ctrl+K vào ô tìm');
+  await p.keyboard.type('kiem ke'); await p.waitForTimeout(300);
+  chk((await rows()).join('|')==='Kiểm kê','desktop: tìm "kiem ke" ra mục con dù sidebar đã gộp');
+  await p.fill('#navSearch',''); await p.focus('#navSearch');
   await p.keyboard.type('khách'); await p.waitForTimeout(300);
   chk(await p.evaluate(()=>[...document.querySelectorAll('#sidebarNav .sidebar-item')].length>=1&&[...document.querySelectorAll('#sidebarNav .sidebar-item')].every(e=>/khách|kh/i.test(e.textContent))),'desktop: tìm "khách" lọc menu');
   chk(await p.evaluate(()=>{const e=document.querySelector('.sb-store');return !!e}),'desktop: nút chọn quán (class mới) có mặt');
