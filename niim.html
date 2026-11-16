@@ -92,7 +92,7 @@ svg{display:block}
 .stage{display:grid;place-items:center;padding:22px 0 20px;min-height:250px}
 .paper{background:#fff;border-radius:10px;padding:0;box-shadow:0 24px 40px -18px rgba(90,50,20,.55),0 2px 0 rgba(255,255,255,.8) inset;
   transform:rotate(-3deg);transition:transform .3s;line-height:0;overflow:hidden;max-width:100%}
-.paper canvas{display:block;width:100%;height:auto;image-rendering:pixelated}
+.paper canvas{display:block;width:100%;height:auto}
 .herobar{display:flex;align-items:center;justify-content:space-between;gap:10px;background:rgba(255,255,255,.5);
   backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-radius:999px;padding:8px 8px 8px 22px}
 .herobar b{font-size:17px;font-weight:600}
@@ -273,7 +273,7 @@ details[open] summary::after{transform:rotate(-135deg)}
 
         <div class="row">
           <div class="ava" style="background:var(--yellow)"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18M12 3l-3 3M12 3l3 3M12 21l-3-3M12 21l3-3M3 12h18M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3"/></svg></div>
-          <div class="mid"><b>Canh lề</b><small>Hình in thấp quá → tăng «Trên». Lệch trái → tăng «Ngang», lệch phải → số âm.</small>
+          <div class="mid"><b>Canh lề</b><small>«Trên» = đoạn đầu nhãn máy bỏ qua (dưới chừa bằng trên). Lệch trái → tăng «Ngang», lệch phải → số âm.</small>
             <div class="mm"><span>Trên</span><input id="i-ly" inputmode="decimal" aria-label="Lề trên máy bỏ qua, mm"><span>Ngang</span><input id="i-lx" inputmode="text" aria-label="Đẩy ngang, mm"><span>mm</span></div>
           </div>
         </div>
@@ -485,37 +485,39 @@ function chuMotDong(ctx, chu, rong) {
 }
 
 // ════════ Ba mẫu tem ════════
-function veTemLy(ctx, w, h) {
-  var d = S.ly, s = Math.min(w / 320, h / 240), le = Math.round(12 * s);
+// M = lề từng cạnh {t, r, b, l} (điểm) — cạnh nào nhãn đã có sẵn khoảng trắng thì lề gần như bằng 0.
+function veTemLy(ctx, w, h, M) {
+  // Tỉ lệ chữ tính theo phần nội dung (không tính lề) để tem thấp vẫn giữ chữ to.
+  var d = S.ly, s = Math.min(w / (296 + M.l + M.r), h / (190 + M.t + M.b)), xT = M.l, xP = w - M.r;
   ctx.fillStyle = '#000'; ctx.strokeStyle = '#000'; ctx.textBaseline = 'middle';
 
   // Hàng đầu: tên quán + số đơn (ô đen chữ trắng)
-  var caoDau = Math.round(34 * s), yDau = le + caoDau / 2, rongDon = 0;
+  var caoDau = Math.round(34 * s), yDau = M.t + caoDau / 2, rongDon = 0;
   if (d.don) {
     phong(ctx, 800, 22 * s);
     var chuDon = chuMotDong(ctx, d.don, w * 0.45);
     rongDon = Math.ceil(ctx.measureText(chuDon).width + 20 * s);
-    ctx.beginPath(); ctx.roundRect(w - le - rongDon, le, rongDon, caoDau, 9 * s); ctx.fill();
-    ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.fillText(chuDon, w - le - rongDon / 2, yDau + 1 * s);
+    ctx.beginPath(); ctx.roundRect(xP - rongDon, M.t, rongDon, caoDau, 9 * s); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.fillText(chuDon, xP - rongDon / 2, yDau + 1 * s);
     ctx.fillStyle = '#000';
   }
   if (d.quan) {
     phong(ctx, 800, 23 * s); ctx.textAlign = 'left';
-    ctx.fillText(chuMotDong(ctx, d.quan, w - le * 2 - rongDon - 8 * s), le, yDau + 1 * s);
+    ctx.fillText(chuMotDong(ctx, d.quan, xP - xT - rongDon - 8 * s), xT, yDau + 1 * s);
   }
 
   // Hàng cuối: giờ · ly thứ · giá
-  var caoCuoi = Math.round(30 * s), yCuoi = h - le - caoCuoi / 2, coCuoi = d.gia || d.thu || d.gio;
-  var tren = le + caoDau + Math.round(8 * s), duoi = coCuoi ? h - le - caoCuoi - Math.round(8 * s) : h - le;
+  var caoCuoi = Math.round(30 * s), yCuoi = h - M.b - caoCuoi / 2, coCuoi = d.gia || d.thu || d.gio;
+  var tren = M.t + caoDau + Math.round(8 * s), duoi = coCuoi ? h - M.b - caoCuoi - Math.round(8 * s) : h - M.b;
   if (coCuoi) {
     ctx.lineWidth = Math.max(2, Math.round(2 * s)); ctx.setLineDash([6 * s, 5 * s]);
-    ctx.beginPath(); ctx.moveTo(le, duoi + 2 * s); ctx.lineTo(w - le, duoi + 2 * s); ctx.stroke(); ctx.setLineDash([]);
-    var xPhai = w - le;
+    ctx.beginPath(); ctx.moveTo(xT, duoi + 2 * s); ctx.lineTo(xP, duoi + 2 * s); ctx.stroke(); ctx.setLineDash([]);
+    var xPhai = xP;
     if (d.gia) {
       phong(ctx, 800, 26 * s); ctx.textAlign = 'right';
       var g = chuMotDong(ctx, d.gia, w * 0.4); ctx.fillText(g, xPhai, yCuoi + 2 * s); xPhai -= ctx.measureText(g).width + 10 * s;
     }
-    var xTrai = le;
+    var xTrai = xT;
     if (d.gio) {
       phong(ctx, 600, 17 * s); ctx.textAlign = 'left';
       var gi = gioIn(); ctx.fillText(gi, xTrai, yCuoi + 2 * s); xTrai += ctx.measureText(gi).width + 10 * s;
@@ -523,15 +525,15 @@ function veTemLy(ctx, w, h) {
     if (d.thu && xPhai - xTrai > 40 * s) {
       phong(ctx, 700, 17 * s);
       var th = chuMotDong(ctx, d.thu, xPhai - xTrai - 18 * s), rt = ctx.measureText(th).width + 18 * s, ct = 26 * s;
-      var xt = d.gio ? xTrai : le;
+      var xt = d.gio ? xTrai : xT;
       ctx.lineWidth = Math.max(2, Math.round(2 * s));
-      ctx.beginPath(); ctx.roundRect(xt + 1, yCuoi - ct / 2 + 2 * s, rt, ct, ct / 2); ctx.stroke();
-      ctx.textAlign = 'center'; ctx.fillText(th, xt + 1 + rt / 2, yCuoi + 3 * s);
+      ctx.beginPath(); ctx.roundRect(xt + 1, yCuoi - ct / 2 + 1 * s, rt, ct, ct / 2); ctx.stroke();
+      ctx.textAlign = 'center'; ctx.fillText(th, xt + 1 + rt / 2, yCuoi + 2 * s);
     }
   }
 
   // Phần giữa: tên món (to nhất) + tuỳ chọn + ghi chú
-  var rong = w - le * 2, cao = duoi - tren, khoi = [];
+  var rong = xP - xT, cao = duoi - tren;
   var caoPhu = 0, tuy = null, ghi = null;
   if (d.tuy) { phong(ctx, 600, 18 * s); tuy = nganDong(ctx, d.tuy, rong).slice(0, 2); caoPhu += tuy.length * 21 * s + 4 * s; }
   if (d.ghi) { phong(ctx, 700, 17 * s); ghi = chuMotDong(ctx, '• ' + d.ghi, rong); caoPhu += 21 * s + 2 * s; }
@@ -541,26 +543,28 @@ function veTemLy(ctx, w, h) {
   ctx.textAlign = 'left';
   if (mon) {
     phong(ctx, 800, mon.co);
-    mon.dong.forEach(function (dg) { ctx.fillText(dg, le, y + mon.co * 0.57); y += mon.co * 1.14; });
+    mon.dong.forEach(function (dg) { ctx.fillText(dg, xT, y + mon.co * 0.57); y += mon.co * 1.14; });
     y += 4 * s;
   }
-  if (tuy) { phong(ctx, 600, 18 * s); tuy.forEach(function (dg) { ctx.fillText(dg, le, y + 10.5 * s); y += 21 * s; }); y += 2 * s; }
-  if (ghi) { phong(ctx, 700, 17 * s); ctx.fillText(ghi, le, y + 10.5 * s); }
+  if (tuy) { phong(ctx, 600, 18 * s); tuy.forEach(function (dg) { ctx.fillText(dg, xT, y + 10.5 * s); y += 21 * s; }); y += 2 * s; }
+  if (ghi) { phong(ctx, 700, 17 * s); ctx.fillText(ghi, xT, y + 10.5 * s); }
 }
 
-function veChuLon(ctx, w, h) {
-  var d = S.chu, s = Math.min(w / 320, h / 240), le = Math.round((d.khung ? 20 : 12) * s);
+function veChuLon(ctx, w, h, M) {
+  var d = S.chu, s = Math.min(w / 320, h / 240), dem = d.khung ? Math.round(10 * s) : 0;
   ctx.fillStyle = '#000'; ctx.strokeStyle = '#000';
   if (d.khung) {
-    ctx.lineWidth = Math.max(3, Math.round(3 * s));
-    ctx.beginPath(); ctx.roundRect(8 * s, 8 * s, w - 16 * s, h - 16 * s, 14 * s); ctx.stroke();
+    var net = Math.max(3, Math.round(3 * s)), k1 = net / 2 + 1;
+    var kx = Math.max(k1, M.l - 4 * s), ky = Math.max(k1, M.t - 4 * s), kx2 = w - Math.max(k1, M.r - 4 * s), ky2 = h - Math.max(k1, M.b - 4 * s);
+    ctx.lineWidth = net; ctx.beginPath(); ctx.roundRect(kx, ky, kx2 - kx, ky2 - ky, 14 * s); ctx.stroke();
   }
   var chu = String(d.nd || '').trim(); if (!chu) return;
+  var x0 = M.l + dem, y0 = M.t + dem, rw = w - M.r - dem - x0, rh = h - M.b - dem - y0;
   var dam = d.dam ? 800 : 500, soDong = Math.max(chu.split('\n').length, 6);
-  var k = vuaKhung(ctx, chu, dam, w - le * 2, h - le * 2, Math.round(h * 0.6), Math.round(12 * s), soDong);
+  var k = vuaKhung(ctx, chu, dam, rw, rh, Math.round(h * 0.6), Math.round(12 * s), soDong);
   phong(ctx, dam, k.co); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  var buoc = k.co * 1.16, y = h / 2 - (k.dong.length - 1) * buoc / 2 + k.co * 0.04;
-  k.dong.forEach(function (dg) { ctx.fillText(dg, w / 2, y); y += buoc; });
+  var buoc = k.co * 1.16, y = y0 + rh / 2 - (k.dong.length - 1) * buoc / 2 + k.co * 0.04;
+  k.dong.forEach(function (dg) { ctx.fillText(dg, x0 + rw / 2, y); y += buoc; });
 }
 
 function veAnh(ctx, w, h) {
@@ -604,19 +608,25 @@ function denTrang(ctx, w, h, nguong, cham) {
 
 // Vùng máy in với tới trên nhãn. Máy B1 (giấy không chip) bắt đầu in thấp hơn mép trên nhãn một đoạn (lechY)
 // và hình lệch ngang một đoạn (lechX > 0: máy in lệch trái nên phải đẩy hình sang phải).
+// Để tem cân đối, phía dưới cũng chừa trắng đúng bằng đoạn lechY phía trên.
 function khung() {
   var W = Math.round(S.rong * DPMM), H = Math.round(S.cao * DPMM);
-  var oy = kep(Math.round(S.lechY * DPMM), 0, H - 80), ox = kep(Math.round(S.lechX * DPMM), -(W - 80), W - 80);
-  return { W: W, H: H, ox: ox, oy: oy, dw: W - Math.abs(ox), dh: H - oy };
+  var oy = kep(Math.round(S.lechY * DPMM), 0, Math.floor((H - 80) / 2)), ox = kep(Math.round(S.lechX * DPMM), -(W - 80), W - 80);
+  return { W: W, H: H, ox: ox, oy: oy, dw: W - Math.abs(ox), dh: H - 2 * oy };
 }
 // Dựng tem ra canvas đúng số điểm sẽ gửi cho máy in (rộng = ngang đầu in, cao = chiều giấy chạy).
 // Dòng 0 của canvas rơi vào vị trí lechY trên nhãn; cột c rơi vào vị trí c − lechX.
 function veTem() {
-  var k = khung(), ngang = S.xoay % 180 === 0, w = ngang ? k.dw : k.dh, h = ngang ? k.dh : k.dw;
+  var k = khung(), q = (S.xoay / 90) % 4, ngang = q % 2 === 0, w = ngang ? k.dw : k.dh, h = ngang ? k.dh : k.dw;
   var tam = document.createElement('canvas'); tam.width = w; tam.height = h;
   var c = tam.getContext('2d', { willReadFrequently: true });
   c.fillStyle = '#fff'; c.fillRect(0, 0, w, h);
-  if (S.mau === 'ly') veTemLy(c, w, h); else if (S.mau === 'chu') veChuLon(c, w, h); else veAnh(c, w, h);
+  // Khoảng trắng nhãn đã có sẵn ở từng cạnh (trên, phải, dưới, trái) → lề của mẫu chỉ bù phần còn thiếu.
+  var le = Math.round(12 * Math.min(w / 320, h / 240));
+  var san = [k.oy, Math.max(0, k.ox), k.oy, Math.max(0, -k.ox)];
+  var canh = [0, 1, 2, 3].map(function (i) { return Math.max(2, le - san[(i + q) % 4]); });
+  var M = { t: canh[0], r: canh[1], b: canh[2], l: canh[3] };
+  if (S.mau === 'ly') veTemLy(c, w, h, M); else if (S.mau === 'chu') veChuLon(c, w, h, M); else veAnh(c, w, h);
   var laAnh = S.mau === 'anh' && anhNguon;
   denTrang(c, w, h, laAnh ? S.anh.nguong : 150, laAnh && S.anh.cham);
 
@@ -626,17 +636,13 @@ function veTem() {
   o.save(); o.translate(Math.max(0, k.ox) + k.dw / 2, k.dh / 2); o.rotate(S.xoay * Math.PI / 180); o.drawImage(tam, -w / 2, -h / 2); o.restore();
   return dich;
 }
-// Xem trước = cả tờ nhãn thật: hình nằm đúng chỗ sẽ in ra, phần máy không với tới tô xám nhạt.
+// Xem trước = cả tờ nhãn thật, hình nằm đúng chỗ sẽ in ra trên nhãn.
 function veXemTruoc() {
   var k = khung(), gui = veTem();
   cv.width = k.W; cv.height = k.H;
   var o = cv.getContext('2d'); o.imageSmoothingEnabled = false;
   o.fillStyle = '#fff'; o.fillRect(0, 0, k.W, k.H);
   o.drawImage(gui, -k.ox, k.oy);
-  o.fillStyle = '#ececf0';
-  if (k.oy > 0) o.fillRect(0, 0, k.W, k.oy);
-  if (k.ox > 0) o.fillRect(k.dw, 0, k.ox, k.H);
-  if (k.ox < 0) o.fillRect(0, 0, -k.ox, k.H);
   return gui;
 }
 
