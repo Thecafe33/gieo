@@ -534,11 +534,11 @@ html[data-theme="dark"] .bf-pay.is-cash{background:#1f3b2a;color:#86d9a6}html[da
 .cash-miss .cash-open{font-style:normal;color:var(--sub)}.cash-miss em{font-style:normal;color:var(--sub)}.cash-miss.done{color:var(--green)}.cash-miss.done .icon{width:15px;height:15px}
 .cash-miss .cash-bulk{display:inline-flex;align-items:center;gap:6px;background:#d2333f;border-color:#d2333f;color:#fff;margin-right:4px}.cash-miss .cash-bulk .icon{width:14px;height:14px}
 .cashm-top{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px;font-size:13px}.cashm-list{display:flex;flex-direction:column;gap:8px;max-height:58vh;overflow:auto;margin-bottom:14px}
-.cashm-row{border:1.5px solid var(--line);border-radius:14px;background:var(--panel)}.cashm-row[open]{border-color:color-mix(in srgb,var(--green) 40%,var(--line))}
-.cashm-row summary{display:grid;grid-template-columns:64px 1fr 150px;align-items:center;gap:6px 10px;padding:10px 12px;cursor:pointer;list-style:none}.cashm-row summary::-webkit-details-marker{display:none}
-.cashm-date{font-weight:800;font-size:15px;display:flex;flex-direction:column;line-height:1.15}.cashm-date small{font-weight:600;font-size:11px;color:var(--sub)}.cashm-exp{font-size:12px;color:var(--sub)}.cashm-exp b{display:block;font-size:14px;color:var(--ink)}
-.cashm-in{min-height:42px;text-align:right}.cashm-var{grid-column:2 / 4;justify-self:end;font-size:12px;min-height:0}.cashm-var:empty{display:none}
-.cashm-detail{padding:2px 14px 12px;border-top:1px dashed var(--line)}@media(max-width:560px){.cashm-row summary{grid-template-columns:52px 1fr}.cashm-in{grid-column:1 / 3}.cashm-var{grid-column:1 / 3}}
+.cashm-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:10px 12px;padding:15px 16px;border:1.5px solid var(--line);border-radius:16px;background:var(--panel)}.cashm-row.is-done{border-color:color-mix(in srgb,var(--green) 40%,var(--line));background:color-mix(in srgb,var(--green) 6%,var(--panel))}
+.cashm-date{grid-column:1;font-weight:850;font-size:30px;letter-spacing:-.6px;display:flex;align-items:baseline;gap:8px;line-height:1.05}.cashm-date small{font-weight:750;font-size:14px;letter-spacing:0;color:var(--green)}
+.cashm-exp{grid-column:2 / -1;text-align:right;font-size:12.5px;font-weight:650;color:var(--sub)}.cashm-exp b{display:block;font-size:28px;font-weight:850;letter-spacing:-.5px;line-height:1.1;color:var(--ink);white-space:nowrap}.cashm-exp small{display:block;font-size:12px;margin-top:2px;color:var(--amber)}
+.cashm-in{grid-column:1 / 3;min-height:54px;font-size:22px;font-weight:800;text-align:right}.cashm-row .apb{grid-column:3;min-height:54px;padding:10px 20px;font-size:15px}.cashm-var{grid-column:1 / -1;justify-self:start;font-size:14px;font-weight:700;min-height:0}.cashm-var:empty{display:none}
+@media(max-width:560px){.cashm-row{padding:13px 14px}.cashm-date{font-size:27px}.cashm-exp b{font-size:25px}.cashm-row .apb{padding:10px 16px}}
 .cash-start{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--sub);font-weight:650}.cash-start input{border:1px solid var(--line);border-radius:12px;padding:6px 8px;background:var(--panel);color:var(--ink);font:inherit}
 @media(max-width:760px){.cash-grid{grid-template-columns:1fr}.cash-exp strong{font-size:30px}.cash-start{width:100%}}
 /* [SIDEBAR] 10 mục (thêm Điểm hoà vốn / Chi phí / Tài sản / Tiền mặt): danh sách tự cuộn trong sidebar, gọn lại khi màn thấp;
@@ -3280,7 +3280,7 @@ async function loadCurrent(force=false){
   if(view==='lich'){employees=result.employees.map(mapEmployee);for(const k of Object.keys(schedules))if(k.startsWith(result.store+'|'))delete schedules[k];for(const s of result.records)schedules[result.store+'|'+safeId(s.employeeId)+'|'+s.date]={off:!!s.isOff,start:s.startTime||'',end:s.endTime||'',assigned:true}}
   if(view==='cc'){employees=result.people.map(mapEmployee);live.lateGrace=Number(result.settings.lateGraceMinutes)||0;shifts=[];live.stale=[];live.ccSchedules=new Map();for(const group of result.groups){shifts.push(...group.day.map(s=>mapShift(s,group.store)));live.stale.push(...group.open.filter(s=>s.businessDate<currentDate()).map(s=>mapShift(s,group.store)));for(const s of group.schedules)live.ccSchedules.set(group.store+'|'+safeId(s.employeeId),s)}}
   if(view==='luong'){live.payroll=result;employees=result.employees.map(mapEmployee)}
-  live.ready[view]=key;live.updates[view]=Date.now();live.updatedAt=live.updates[view];live.loadingKey=null;live.error=null;render();if(view==='tienmat')cashLoadGieoDay(result);
+  live.ready[view]=key;live.updates[view]=Date.now();live.updatedAt=live.updates[view];live.loadingKey=null;live.error=null;render();if(view==='tienmat'){cashLoadGieoDay(result);cashAutoBulk(result)}
  }catch(error){if(token!==live.request)return;live.loadingKey=null;live.error={key,message:friendlyError(error)};render()}
 }
 function friendlyError(error){const code=String(error?.code||'');if(/permission-denied|unauthorized/.test(code))return'Không có quyền đọc hoặc ghi dữ liệu. Hãy kiểm tra tài khoản và quyền truy cập.';if(/network|unavailable|offline/.test(code))return'Không kết nối được dữ liệu. Kiểm tra mạng rồi bấm Tải lại.';if(/auth\//.test(code))return'Không đăng nhập được hệ thống ('+code+').';return String(error?.message||'Không tải được dữ liệu. Hãy thử lại.')}
@@ -3737,8 +3737,8 @@ async function approveSelectedExpenses(){
 }
 // [DUYỆT-TICK] Nút Duyệt 3 trạng thái (idle → busy → done). Lỗi → về idle + toast lỗi của commitAction. Ghi xong rồi mới giữ tick ~0,65s, sau đó khoản mới rời danh sách (costPendDrop).
 function approveBtnHtml(call){return apbHtml(`onclick="${call}"`,'Duyệt','Đang duyệt…','Đã duyệt')}
-function apbHtml(attrs,l0,l1,l2){return `<button class="btn apb" data-st="idle" ${attrs}><span class="apb-ic"><i class="apb-idle">${icon('check')}</i><i class="apb-disc"></i><i class="apb-spin"></i><svg class="apb-ok" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.3 8.3 6.6 11.5 12.7 4.9"/></svg></span><span class="apb-txt"><span>${l0}</span><span>${l1}</span><span>${l2}</span></span></button>`}
-function apbSet(b,st){if(!b||!b.isConnected||!b.classList.contains('apb')||b.dataset.st===st)return;const t=b.querySelector('.apb-txt');const w0=t.offsetWidth;t.style.width='';b.dataset.st=st;const w1=t.offsetWidth;t.style.width=w0+'px';t.getBoundingClientRect();t.style.width=w1+'px';clearTimeout(b._apw);b._apw=setTimeout(()=>{t.style.width=''},560);b.disabled=st!=='idle';b.parentElement?.querySelectorAll('button').forEach(x=>{if(x!==b)x.disabled=st!=='idle'})}
+function apbHtml(attrs,l0,l1,l2){return `<button class="btn apb" data-st="idle" aria-label="${l0}" ${attrs}><span class="apb-ic"><i class="apb-idle">${icon('check')}</i><i class="apb-disc"></i><i class="apb-spin"></i><svg class="apb-ok" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.3 8.3 6.6 11.5 12.7 4.9"/></svg></span><span class="apb-txt"><span>${l0}</span><span>${l1}</span><span>${l2}</span></span></button>`}
+function apbSet(b,st){if(!b||!b.isConnected||!b.classList.contains('apb')||b.dataset.st===st)return;const t=b.querySelector('.apb-txt');const w0=t.offsetWidth;t.style.width='';b.dataset.st=st;const w1=t.offsetWidth;t.style.width=w0+'px';t.getBoundingClientRect();t.style.width=w1+'px';b.setAttribute('aria-label',t.children[{idle:0,busy:1,done:2}[st]].textContent);clearTimeout(b._apw);b._apw=setTimeout(()=>{t.style.width=''},560);b.disabled=st!=='idle';b.parentElement?.querySelectorAll('button').forEach(x=>{if(x!==b)x.disabled=st!=='idle'})}
 const apbHold=()=>new Promise(r=>setTimeout(r,650));
 async function approveGieoExpense(store,id,btn){apbSet(btn,'busy');const ok=await commitAction('ggexp:'+store+':'+id,()=>backend.reviewGieoExpense(store,id,true),async()=>{apbSet(btn,'done');await apbHold();costPendDrop('gieo',store,id);toast('Đã duyệt chi phí.');await costQuietRefresh('rev','hoavon')});if(!ok)apbSet(btn,'idle')}
 async function rejectGieoExpense(store,id){const note=prompt('Lý do từ chối (không bắt buộc):','');if(note===null)return;await commitAction('ggexp:'+store+':'+id,()=>backend.reviewGieoExpense(store,id,false,note),async()=>{costPendDrop('gieo',store,id);toast('Đã từ chối.');await costQuietRefresh('rev','hoavon')})}
@@ -4124,48 +4124,47 @@ async function saveCash(event,storeId,date){
  event.preventDefault();const f=new FormData(event.target),n=goalNumber(f.get('received')),r=cashRow(live.cash,storeId,date)||{},button=event.target.querySelector('[type="submit"]');
  apbSet(button,'busy');const ok=await commitAction('cash:'+storeId+date,()=>backend.writeCashReceipt(storeId,date,n,{expected:r.expected,sales:r.sales,spent:r.spent}),async()=>{apbSet(button,'done');await apbHold();state.cashEdit=null;invalidateViews('tienmat');await loadCurrent(true);toast('Đã ghi thực nhận.')});if(!ok)apbSet(button,'idle');
 }
-// ---- Nhập nhiều ngày một lượt (tab Tiền mặt): mỗi ngày chưa nhận là 1 dòng, bấm dòng để xem chi tiết ngày đó ----
-let CASHM=null;
+// ---- Nhập nhiều ngày (tab Tiền mặt): popup mỗi ngày 1 dòng — phải nộp, ô nhập, nút XÁC NHẬN RIÊNG từng ngày (không có nút lưu chung).
+// Gõ được nhiều ngày cùng lúc, không khoá theo ngày; ngày nào bấm xác nhận thì ghi đúng ngày đó (writeCashReceipt như nhập 1 ngày). Không hiện chi tiết.
+let CASHM=null,CASH_AUTO_DONE=false,cashRefreshTimer=null;
 function cashBulkRows(storeId){const c=live.cash;return cashMissing(c,storeId).filter(m=>!m.open).map(m=>({d:m.d,r:cashRow(c,storeId,m.d)||{}})).filter(x=>!(storeId!=='tc33'&&storeId!=='xofa'&&x.r.unclassified))}
-function cashBulkDetail(id,r){
- const gg=id!=='tc33'&&id!=='xofa',row=(a,b)=>`<div class="detail-row"><span>${a}</span><b class="num">${b}</b></div>`;
- let h=gg?row('Bàn giao lúc kết ca',money(r.handed||0)+' ₫')+(r.retained?row('Giữ lại két',money(r.retained)+' ₫'):'')+(Number(r.after)>0?row('Bổ sung sau kết ca','+'+money(r.after)+' ₫'):'')+(r.recipient?row('Người nhận',esc(r.recipient)):''):row('Tiền mặt bán',money(r.sales||0)+' ₫')+(r.spent?row('Chi tại quầy','−'+money(r.spent)+' ₫'):'');
- if(r.reconciliation&&r.reconciliation.countedCash!=null)h+=row('Nhân viên đã đếm',cashNumber(r.reconciliation.countedCash))+row('Theo hệ thống trong két',cashNumber(r.reconciliation.expectedCash));
- if(r.needsConfirmation)h+=`<p class="cash-msg">Có bill bổ sung / số phải nhận đã đổi.${r.received!=null?' Đã ghi nhận trước '+money(r.received)+' ₫.':''}</p>`;
- return h;
+function cashBulkVar(v){return v===0?'<span class="cash-var ok">Khớp</span>':v<0?`<span class="cash-var down">Lệch −${money(-v)} ₫ · ck thêm ${money(-v)} ₫ là đủ</span>`:`<span class="cash-var up">Lệch +${money(v)} ₫ · thừa ${money(v)} ₫</span>`}
+// Tự mở popup MỘT lần mỗi lần mở trang cho quán đầu tiên có ≥ 2 ngày chờ nhập; đóng rồi không tự mở lại (còn nút «Nhập N ngày một lượt»).
+function cashAutoBulk(c){
+ if(CASH_AUTO_DONE||state.view!=='tienmat'||live.cash!==c||$('#dialog').open)return;
+ const st=stores.filter(x=>HR_STORE_IDS.includes(x.id)||(x.brand==='gieo'&&x.active!==false)).find(x=>cashBulkRows(x.id).length>=2);
+ if(!st)return;CASH_AUTO_DONE=true;cashBulk(st.id);
 }
 function cashBulk(id){
  const rows=cashBulkRows(id);if(!rows.length){toast('Không còn ngày nào chờ nhập.');return}
- CASHM={id,rows:rows.map(x=>x.d)};
- const st=stores.find(x=>x.id===id)||{},name=st.brand==='gieo'?'Gieo '+(st.code||''):st.name;
- openDialog('Nhập thực nhận · '+esc(name||id),`<form onsubmit="cashBulkSave(event)"><div class="cashm-top"><span id="cashmSum"></span><button type="button" class="btn secondary" onclick="cashBulkFill()">Điền đủ theo phải nộp</button></div><div class="cashm-list">${rows.map(({d,r})=>{const exp=Number(r.expected)||0;return `<details class="cashm-row" data-d="${d}"><summary><span class="cashm-date">${d.slice(8)}/${d.slice(5,7)}<small>${['CN','T2','T3','T4','T5','T6','T7'][parseDate(d).getDay()]}</small></span><span class="cashm-exp">Phải nộp <b class="num">${money(exp)} ₫</b></span><input class="input num cashm-in" name="r_${d}" inputmode="numeric" autocomplete="off" maxlength="16" placeholder="${groupMoneyInput(exp)}" value="${r.needsConfirmation&&r.received!=null?groupMoneyInput(r.received):''}" aria-label="Thực nhận ${dateVN(d)}" onclick="event.stopPropagation()" onkeydown="if(event.key===' ')event.stopPropagation()" oninput="this.value=groupMoneyInput(this.value);cashBulkLive()"><span class="cashm-var" id="cashmv-${d}"></span></summary><div class="cashm-detail">${cashBulkDetail(id,r)}</div></details>`}).join('')}</div><div class="form-actions"><button type="button" class="btn secondary" onclick="closeDialog()">Huỷ</button><button type="submit" class="btn" id="cashmSave">Lưu</button></div></form>`);
- $('#dialog').classList.add('store-detail','keep-open');cashBulkLive();
+ CASHM={id,rows,done:new Set()};
+ const st=stores.find(x=>x.id===id)||{},name=st.brand==='gieo'?'Gieo '+(st.code||''):st.name,DOW=['CN','T2','T3','T4','T5','T6','T7'];
+ const line=({d,r})=>{const exp=Number(r.expected)||0,pre=r.needsConfirmation&&r.received!=null;return `<form class="cashm-row" id="cashm-${d}" onsubmit="cashDaySave(event,'${d}')"><span class="cashm-date">${d.slice(8)}/${d.slice(5,7)}<small>${DOW[parseDate(d).getDay()]}</small></span><span class="cashm-exp">Phải nộp <b class="num">${money(exp)} ₫</b>${pre?`<small>Đã ghi trước ${money(r.received)} ₫</small>`:''}</span><input class="input num cashm-in" id="cashm-in-${d}" inputmode="numeric" autocomplete="off" maxlength="16" placeholder="${groupMoneyInput(exp)}" value="${pre?groupMoneyInput(r.received):''}" aria-label="Thực nhận ${dateVN(d)}" oninput="this.value=groupMoneyInput(this.value);cashBulkLive('${d}')">${apbHtml('type="submit" disabled',r.needsConfirmation?'Xác nhận tổng':'Xác nhận','Đang xác nhận…','Đã xác nhận')}<span class="cashm-var" id="cashmv-${d}"></span></form>`};
+ openDialog('Nhập thực nhận · '+esc(name||id),`<div class="cashm-top"><span id="cashmSum"></span><button type="button" class="btn secondary" onclick="cashBulkFill()">Điền đủ theo phải nộp</button></div><div class="cashm-list">${rows.map(line).join('')}</div>`);
+ $('#dialog').classList.add('store-detail','keep-open');rows.forEach(x=>cashBulkLive(x.d));
 }
-function cashBulkLive(){
- if(!CASHM)return;const rows=cashBulkRows(CASHM.id),form=$('#dialog form');if(!form)return;
- let n=0,got=0,exp=0;
- for(const{d,r}of rows){const e=Number(r.expected)||0,v=form.elements['r_'+d]?.value||'',o=document.getElementById('cashmv-'+d);exp+=e;if(o)o.innerHTML=v===''?'':cashVar(Math.round(goalNumber(v)-e));if(v!==''){n++;got+=goalNumber(v)}}
- $('#cashmSum').innerHTML=`Phải nộp <b class="num">${money(exp)} ₫</b> · đã nhập <b class="num">${money(got)} ₫</b> (${n}/${rows.length} ngày)`;
- const b=$('#cashmSave');if(b){b.textContent=n?'Lưu '+n+' ngày':'Lưu';b.disabled=!n}
+function cashBulkLive(d){
+ const M=CASHM;if(!M)return;
+ if(d){const x=M.rows.find(y=>y.d===d),inp=document.getElementById('cashm-in-'+d),o=document.getElementById('cashmv-'+d),b=document.querySelector('#cashm-'+d+' .apb');
+  if(x&&inp&&o&&!M.done.has(d)){const e=Number(x.r.expected)||0;o.innerHTML=inp.value===''?'':cashBulkVar(Math.round(goalNumber(inp.value)-e));if(b&&b.dataset.st==='idle')b.disabled=inp.value===''}}
+ const left=M.rows.filter(x=>!M.done.has(x.d)),exp=left.reduce((a,x)=>a+(Number(x.r.expected)||0),0),el=$('#cashmSum');
+ if(el)el.innerHTML=left.length?`Còn <b>${left.length}</b> ngày chưa xác nhận · phải nộp <b class="num">${money(exp)} ₫</b>`:'Đã xác nhận đủ các ngày.';
 }
 function cashBulkFill(){
- const form=$('#dialog form');if(!form||!CASHM)return;
- for(const{d,r}of cashBulkRows(CASHM.id)){const el=form.elements['r_'+d];if(el&&el.value==='')el.value=groupMoneyInput(Number(r.expected)||0)}
- cashBulkLive();
+ if(!CASHM)return;for(const x of CASHM.rows){const el=document.getElementById('cashm-in-'+x.d);if(el&&!CASHM.done.has(x.d)&&el.value===''&&!el.readOnly){el.value=groupMoneyInput(Number(x.r.expected)||0);cashBulkLive(x.d)}}
 }
-async function cashBulkSave(event){
- event.preventDefault();if(!CASHM)return;const form=event.target,id=CASHM.id,button=$('#cashmSave'),todo=[];
- for(const{d,r}of cashBulkRows(id)){const v=form.elements['r_'+d]?.value||'';if(v!=='')todo.push({d,r,n:goalNumber(v)})}
- if(!todo.length)return;button.disabled=true;
- const bad=[];let ok=0;
- await commitAction('cashm:'+id,async()=>{
-  for(const t of todo){try{await backend.writeCashReceipt(id,t.d,t.n,{expected:t.r.expected,sales:t.r.sales,spent:t.r.spent});ok++}catch(e){bad.push(t.d.slice(8)+'/'+t.d.slice(5,7)+': '+friendlyError(e))}}
- },async()=>{
-  state.cashEdit=null;invalidateViews('tienmat');await loadCurrent(true);
-  if(!bad.length){closeDialog();toast('Đã ghi thực nhận '+ok+' ngày.');return}
-  toast('Đã ghi '+ok+' ngày, lỗi '+bad.length+' ngày.');if($('#dialog').open)cashBulk(id);alert('Chưa ghi được:\n'+bad.join('\n'));
+// Ghi riêng từng ngày. Làm mới số liệu tab phía sau gộp một lần (debounce) để không dựng lại popup đang gõ dở các ngày khác.
+async function cashDaySave(event,d){
+ event.preventDefault();const M=CASHM;if(!M||M.done.has(d))return;
+ const form=event.target,btn=form.querySelector('.apb'),inp=document.getElementById('cashm-in-'+d),x=M.rows.find(y=>y.d===d);
+ if(!x||!inp||inp.value===''||(btn&&btn.dataset.st!=='idle'))return;
+ const id=M.id,n=goalNumber(inp.value),r=x.r;apbSet(btn,'busy');inp.readOnly=true;
+ const ok=await commitAction('cash:'+id+d,()=>backend.writeCashReceipt(id,d,n,{expected:r.expected,sales:r.sales,spent:r.spent}),async()=>{
+  M.done.add(d);apbSet(btn,'done');form.classList.add('is-done');cashBulkLive();state.cashEdit=null;invalidateViews('tienmat');
+  clearTimeout(cashRefreshTimer);cashRefreshTimer=setTimeout(()=>{if(state.view==='tienmat')loadCurrent(true)},800);
+  if(M.done.size===M.rows.length){await apbHold();if(CASHM===M&&$('#dialog').open)closeDialog();toast('Đã ghi thực nhận '+M.rows.length+' ngày.')}
  });
- if(button.isConnected)button.disabled=false;
+ if(!ok){inp.readOnly=false;apbSet(btn,'idle');cashBulkLive(d)}
 }
 async function setCashStart(v){if(!v||v>currentDate())return;const back=Math.round((parseDate(currentDate())-parseDate(v))/864e5);if(back>62&&!confirm('Mốc lùi '+back+' ngày — mọi ngày chưa nhận từ mốc đó sẽ hiện ra để nhập (đọc doanh thu từng ngày). Tiếp tục?'))return;await commitAction('cashstart',()=>backend.writeCashStart(v),async()=>{invalidateViews('tienmat');await loadCurrent(true);toast('Đã đổi mốc theo dõi.')})}
 async function saveBreakeven(event){event.preventDefault();const form=event.target,f=new FormData(form),month=state.beMonth,button=form.querySelector('[type="submit"]'),v=id=>({fixed:f.get(id+'_fixed')===''?'':goalNumber(f.get(id+'_fixed'))});button.disabled=true;const ok=await commitAction('be:'+month,()=>backend.writeBreakeven(month,{tc33:v('tc33'),xofa:v('xofa')}),async()=>{invalidateViews('hoavon','rev');await loadCurrent(true);toast('Đã lưu điểm hoà vốn tháng.')});if(!ok&&button.isConnected)button.disabled=false}
