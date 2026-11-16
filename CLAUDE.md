@@ -41,6 +41,7 @@
 
 ## Kế hoạch & tài liệu
 - **Đọc trước tiên: `docs/TRANG_THAI.md`** (bản hiện hành, việc còn mở, bản đồ tài liệu).
+- **Gói chờ deploy (16/11)**: `giao_file/dot_16-11_GOP_v22_gaunoel_quanly/` gộp 3 đợt chưa deploy (kho v22 + Engine 2 v5, Gấu Noel v4, quanlygieo gộp) — chủ dự án deploy một lượt. Sửa file thuộc gói → dựng lại gói gộp từ `ban_deploy/giangsinh/`.
 - Tách posgieo thành `js/posgieo/*.vN.js`: `docs/KE_HOACH_TACH_POSGIEO_DA_CUA_HANG.md` — chỉ chuyển nguyên văn, ưu tiên luồng bán trơn tru.
 - Bản theo mùa: Giáng sinh đang chạy; Tết 2027 (`docs/LIXI_TET_2027.md`). Gấu Noel `gau_noel_giangsinh.v4.js` (16/11, CHƯA deploy — trên máy chủ v3 đang chạy thật; v4 phát theo doanh thu, tự nhận tiếp số đã phát của v3; còn sửa tại chỗ được, sau deploy = v5; luật v4 + hướng dẫn gỡ: `docs/HUONG_DAN_GAU_NOEL.md`). Chế độ thử `docs/CHE_DO_THU.md` — app thật không bao giờ nạp `che_do_thu`.
 - Giao diện quanlygieo: dáng theo manage, **giữ màu hồng `#E23A5D`** (`docs/GIAO_DIEN_QUANLY.md`).

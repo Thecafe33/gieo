@@ -1,0 +1,247 @@
+'use strict';
+const crypto=require('node:crypto');
+const A=require('./shared/gieo_automation.v3.js');
+const hash=x=>crypto.createHash('sha256').update(A.stable(x)).digest('hex');
+const key=(kind,id)=>hash([kind,id]);
+const {readError,writeError,setError}=require('./errors');
+const E2=require('./shared/unit_engine2_v1');
+const rootPath=store=>A.collection('duty_digests',store)+'/_automation';
+const configPath=store=>A.collection('duty_digests',store)+'/_automation_config';
+const BOOTSTRAP=[
+ ['alerts','status','==','new'],['alerts','status','==','seen'],
+ ['duty_cases','status','==','pending_verify'],['duty_cases','status','==','contested'],['duty_cases','status','==','dispute'],
+ ['stock_containers','status','==','open'],['stock_containers','status','==','sealed'],['stock_containers','needsReview','==',true],
+ ['duty_tasks','status','==','open'],['duty_tasks','status','==','processing'],
+ ['prep_batches','status','==','active'],['prep_batches','needsReview','==',true],['inventory_items'],['stock_counts','status','==','pending_review'],
+ ['purchase_orders','status','==','pending'],['purchase_orders','status','==','partial'],['expenses','status','==','pending_review'],
+ ['daily_openings','businessDate','>=','$from'],['daily_closings','businessDate','>=','$from'],
+ ['stock_transactions','businessDate','>=','$from'],['prep_transactions','businessDate','>=','$from']
+];
+function createWorker(db,opts={}){
+ const now=opts.now||Date.now;
+ async function processSource(store,kind,id,extraSources=[]){
+  if(!A.kinds.includes(kind))return;
+  const source=db.doc(A.collection(kind,store)+'/'+id);
+  if(opts.getEngine && ['duty_tasks','duty_cases'].includes(kind)){
+   const [snap,cfgSnap]=await Promise.all([source.get(),db.doc(configPath(store)).get()]);
+   if(snap.exists&&cfgSnap.exists&&cfgSnap.data().enabled&&cfgSnap.data().mode==='active'&&cfgSnap.data().fleet20Confirmed===true){const d=snap.data(),guard={ref:db.doc(configPath(store)),updatedAt:cfgSnap.data().updatedAt||''};
+    if(kind==='duty_tasks'&&A.time(d.expireAt)<=now())await opts.getEngine(store).duty.expireTask(id,{guard});
+    if(kind==='duty_cases'&&['contested','dispute'].includes(d.status))await opts.getEngine(store).duty.closePolicy(id,{expectedRevision:Number(d.revision)||0,days:Number(cfgSnap.data().disputeDays)||7,guard});
+   }
+  }
+  // Every decision reads the CURRENT source inside the transaction. Delivery order is irrelevant.
+  const outcome=await db.runTransaction(async tx=>{
+   const [src,cfgSnap]=await Promise.all([tx.get(source),tx.get(db.doc(configPath(store)))]);
+   const cfg=cfgSnap.exists?cfgSnap.data():{};
+   if(!cfg.enabled)return;
+   let data=src.exists?src.data():null, actualKind=kind, actualId=id, related={};
+   const indexRef=db.doc(rootPath(store)+'/sources/'+key(kind,id));
+   const indexSnap=kind.endsWith('_transactions')?await tx.get(indexRef):null;
+   const indexed=indexSnap?.exists?indexSnap.data():null;
+   let linked='';
+   if(kind==='alerts'&&data){
+    if(data.type==='duty_case'&&data.caseId)linked=data.caseId;
+    else if(data.type==='prep_count_variance'&&data.prepId&&A.time(data.createdAt))linked=('prep_'+data.prepId+'_'+A.time(data.createdAt)).replace(/[^\w\-]/g,'_').slice(0,180);
+    if(linked){
+     const doc=await tx.get(db.doc(A.collection('duty_cases',store)+'/'+linked));
+     if(doc.exists){actualKind='duty_cases';actualId=linked;data=doc.data();}
+    }
+   }
+   if(kind==='daily_closings'&&!data){const sn=await tx.get(db.doc(A.collection('daily_openings',store)+'/'+id));if(sn.exists){data=sn.data();actualKind='daily_openings';}}
+   if(kind==='daily_openings'||actualKind==='daily_openings'){
+    const close=await tx.get(db.doc(A.collection('daily_closings',store)+'/'+id));
+    related.closing=close.exists?close.data():null;
+   }
+   // Both opening and closing address the SAME operational case. Cash is out of scope.
+   const waste=actualKind.endsWith('_transactions');
+   const canonicalKind=waste&&(data?.wasteEventId||indexed?.eventId)?'waste':['daily_openings','daily_closings'].includes(actualKind)?'day':actualKind;
+   const canonicalId=canonicalKind==='waste'?(data?.wasteEventId||indexed.eventId):actualId;
+   if(indexed?.eventId&&data?.wasteEventId&&indexed.eventId!==data.wasteEventId)throw Error('Mã sự kiện hao hụt đã đổi; cần kiểm tra liên kết trước khi tổng hợp');
+   const caseRef=db.doc(rootPath(store)+'/cases/'+key(canonicalKind,canonicalId));
+   const [oldSnap,sumSnap]=await Promise.all([tx.get(caseRef),tx.get(db.doc(rootPath(store)))]);
+   const old=oldSnap.exists?oldSnap.data():null, sum=sumSnap.exists?sumSnap.data():{};
+   const aliasRef=kind==='alerts'&&actualKind==='duty_cases'?db.doc(rootPath(store)+'/cases/'+key('alerts',id)):null;
+   const aliasSnap=aliasRef?await tx.get(aliasRef):null;
+   const alias=aliasSnap?.exists?aliasSnap.data():null;
+   let decision=A.task(actualKind,actualId,data,cfg,now(),related),parts=null;
+   if(actualKind==='stock_containers'&&data?.status==='finished'&&data.needsReview){
+    const proof=await tx.get(db.doc(E2.rootPath(store)+'/cases/'+E2.key('finish','finish_'+actualId+'_WASTE')));
+    if(proof.exists&&proof.data().mode==='active'&&proof.data().status==='decided'){
+     const settings=await tx.get(db.doc(E2.rootPath(store))),e=proof.data(),s=settings.exists?settings.data():{};
+     if(s.enabled&&s.mode==='active'&&s.fleetConfirmed&&s.protocolVersion===1){related.engine2DecisionId=e.decisionId;decision={...decision,group:'done',state:'recorded',resultStatus:e.decisionMode==='manual'?'manual':'allocated',rule:'ENGINE2_RESULT',nextCheckAt:0,assigneeId:'',assigneeName:'',reason:'Engine 2 đã ghi phân bổ theo khoảng pha chế và giao cân tự động tại POS. Xem căn cứ trong Engine 2; không ghi hao hụt hoặc thu tiền lần hai.',engine2CaseId:proof.id};}
+    }
+   }
+   if(canonicalKind==='waste'){
+    parts={...(old?.parts||{})};
+    const partId=key(actualKind,actualId);
+    parts[partId]={...decision,sourcePath:source.path,sourceHash:hash(data)};
+    for(const other of extraSources){
+     const ref=db.doc(A.collection(other.kind,store)+'/'+other.id),sn=await tx.get(ref),d=sn.exists?sn.data():null;
+     if(d&&d.wasteEventId!==canonicalId)throw Error('Dòng sổ không cùng sự kiện hao hụt');
+     parts[key(other.kind,other.id)]={...A.task(other.kind,other.id,d,cfg,now()),sourcePath:ref.path,sourceHash:hash(d)};
+    }
+    if(Object.keys(parts).length>100)throw Error('Sự kiện có hơn 100 dòng; cần kiểm tra trước khi tổng hợp');
+    const rows=Object.values(parts).filter(p=>!['SOURCE_REMOVED','NO_ACTION','ENGINE_COUNT_LINK'].includes(p.rule)),pending=rows.filter(p=>p.group==='working');
+    decision={...(rows.slice().sort((a,b)=>a.sourcePath.localeCompare(b.sourcePath))[0]||decision),sourceId:canonicalId,kind:'stock_transactions',title:'Hao hụt · '+rows.length+' dòng nguyên liệu/BTP',group:pending.length?'working':'done',
+      rule:rows.length?'WASTE_GROUP':'SOURCE_REMOVED',
+      reason:pending.length?'Hao hụt đã ghi; còn dòng thiếu lý do cần người phụ trách bổ sung.':'Các dòng của cùng sự kiện đã được gom. Không mặc định quy lỗi cho người báo.',value:null};
+   }
+   const fingerprint=hash({data:parts?null:data,parts,related,owners:cfg.owners||{},decision,version:A.VERSION});
+   if(old&&old.fingerprint===fingerprint&&!alias?.visible)return {changed:false};
+   if(!old&&['NO_ACTION','SOURCE_REMOVED','ENGINE_COUNT_LINK'].includes(decision.rule))return {changed:false};
+   const at=new Date(now()).toISOString();
+   const result={...decision,policyVersion:A.VERSION,storeId:store,id:caseRef.id,sourcePath:A.collection(actualKind,store)+'/'+actualId,
+    fingerprint,createdAt:old?.createdAt||at,updatedAt:at,revision:(old?.revision||0)+1,
+    visible:!['NO_ACTION','SOURCE_REMOVED','ENGINE_COUNT_LINK'].includes(decision.rule),parts,linkedDutyId:linked||'',assigneeMissing:decision.group==='working'&&!decision.assigneeId};
+   // No source ledger/stock/receipt is mutated. Manual Engine decisions remain authoritative.
+   const delta=A.counterDelta(old,result),counts={...(sum.counts||{})};
+   const aliasDelta=A.counterDelta(alias,null);
+   for(const group of Object.keys(delta))counts[group]=Math.max(0,(counts[group]||0)+delta[group]+aliasDelta[group]);
+   if(aliasRef&&alias)tx.set(aliasRef,{...alias,visible:false,rule:'NO_ACTION',linkedDutyId:actualId,reason:'Đã liên kết với hồ sơ Engine; không đếm trùng.',nextCheckAt:0});
+   if(linked&&actualKind==='alerts')tx.set(db.doc(rootPath(store)+'/dependents/'+key('duty_cases',linked)+'/alerts/'+id),{alertId:id});
+   if(waste){tx.set(indexRef,{eventId:canonicalKind==='waste'?canonicalId:'',caseId:caseRef.id});
+    for(const other of extraSources)tx.set(db.doc(rootPath(store)+'/sources/'+key(other.kind,other.id)),{eventId:canonicalKind==='waste'?canonicalId:'',caseId:caseRef.id});
+   }
+   tx.set(caseRef,result);
+   for(const day of new Set([old?.businessDate,result.businessDate]))if(/^\d{4}-\d{2}-\d{2}$/.test(day||'') && (waste||actualKind==='duty_cases'))tx.set(db.doc(rootPath(store)+'/days/'+day),{day,dirty:true,dirtyToken:fingerprint},{merge:true});
+   tx.set(caseRef.collection('history').doc(String(result.revision)),{
+    at,rule:result.rule,reason:result.reason,group:result.group,sourceStatus:result.sourceStatus,
+    sourceFingerprint:fingerprint,previousFingerprint:old?.fingerprint||'',policyVersion:A.VERSION,
+    assigneeId:result.assigneeId,allocations:result.allocations,pool:result.pool
+   });
+   tx.set(db.doc(rootPath(store)),{counts,countsRevision:(Number(sum.countsRevision)||0)+1,updatedAt:at,policyVersion:A.VERSION},{merge:true});
+   return {changed:true,id:caseRef.id};
+  });
+  if(kind==='duty_cases'){
+   const waiting=await db.collection(rootPath(store)+'/dependents/'+key(kind,id)+'/alerts').limit(100).get();
+   for(const d of waiting.docs){await processSource(store,'alerts',d.id);await d.ref.delete();}
+  }
+  return outcome;
+ }
+ async function markDay(store,day,token){
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(day))return;
+  await db.doc(rootPath(store)+'/days/'+day).set({day,dirty:true,dirtyToken:token},{merge:true});
+ }
+ async function buildDay(store,day){
+  const ref=db.doc(rootPath(store)+'/days/'+day),before=await ref.get();if(!before.exists||!before.data().dirty)return;
+  const token=before.data().dirtyToken;
+  const [stock,prep,cases]=await Promise.all(['stock_transactions','prep_transactions','duty_cases'].map(kind=>{
+   let q=db.collection(A.collection(kind,store)).where('businessDate','==',day);if(kind.endsWith('_transactions'))q=q.where('type','==','WASTE');return q.get();
+  }));
+  const rows=[...stock.docs,...prep.docs].map(x=>({...x.data(),id:x.id}));
+  const declared=rows.filter(d=>!d.voided&&!d.fromPrepCount&&d.wasteKind!=='shift_weigh'&&!d.dutyCaseId);
+  const eventIds=new Set(declared.map(d=>d.wasteEventId||d.id));
+  const c=cases.docs.map(d=>({...d.data(),id:d.id}));
+  const itemStats={};for(const d of declared){const kind=d.prepId?'prep':'nl',id=d.prepId||d.itemId||'unknown',k=kind+':'+id;const row=itemStats[k]||(itemStats[k]={kind,id,name:d.prepName||d.itemName||id,declaredValue:0,lines:0});row.lines++;row.declaredValue+=Math.abs(Number(d.totalCost)||0);}
+  const summary={day,itemStats:Object.values(itemStats),eventCount:eventIds.size,declaredValue:declared.reduce((sum,d)=>sum+Math.abs(Number(d.totalCost)||0),0),
+   missingCost:declared.filter(d=>d.totalCost==null).length,missingReason:declared.filter(d=>!d.reason&&!d.note).length,
+   varianceValue:c.reduce((sum,d)=>sum+Math.abs(Number(d.value)||0),0),caseCount:c.length,
+   // Separate amounts: never add declared loss and count variance as a new financial loss.
+   remakeEventCount:new Set(declared.filter(d=>d.wasteKind==='drink').map(d=>d.wasteEventId||d.id)).size,
+   engineVersion:opts.getEngine?opts.getEngine(store).VERSION:'',updatedAt:new Date(now()).toISOString()};
+  if(opts.getEngine)summary.engineTotals=JSON.parse(JSON.stringify(opts.getEngine(store).duty.buildDigest({day,stockTx:stock.docs.map(d=>({...d.data(),id:d.id})),prepTx:prep.docs.map(d=>({...d.data(),id:d.id})),cases:c,anomalies:[],items:{},preps:{}}).totals));
+  await db.runTransaction(async tx=>{const sn=await tx.get(ref);if(sn.exists&&sn.data().dirtyToken===token)tx.set(ref,{...summary,dirty:false},{merge:true});});
+ }
+ async function bootstrap(store,cfg){
+  const ref=db.doc(rootPath(store));
+  for(let page=0;page<8;page++){
+   const snap=await ref.get(),state=snap.exists?snap.data():{};
+   const b=state.bootstrap||{phase:0,cursor:''};
+   if(b.phase>=BOOTSTRAP.length){await progress(store,cfg,{ready:true});return;}
+   const [kind,field,op,value]=BOOTSTRAP[b.phase];
+   let q=db.collection(A.collection(kind,store));
+   if(kind.endsWith('_transactions'))q=q.where('type','==','WASTE');
+   if(field)q=q.where(field,op,value==='$from'?cfg.startDate:value);
+   // Range query must order by the range field first. A snapshot cursor handles tied dates.
+   if(op==='>=')q=q.orderBy(field);
+   q=q.orderBy(opts.documentId||'__name__');
+   if(b.cursor){const cursor=await db.doc(A.collection(kind,store)+'/'+b.cursor).get();if(cursor.exists)q=q.startAfter(cursor);}
+   const docs=(await q.limit(100).get()).docs;
+   if(kind.endsWith('_transactions')){const groups=new Map();for(const doc of docs){const d=doc.data();if(String(d.type).toUpperCase()!=='WASTE')continue;const k=d.wasteEventId||doc.id;if(!groups.has(k))groups.set(k,[]);groups.get(k).push({kind,id:doc.id});}for(const list of groups.values()){const [first,...rest]=list;await processSource(store,first.kind,first.id,rest);}}
+   else for(const doc of docs)await processSource(store,kind,doc.id);
+   const more=docs.length===100;
+   if(!await progress(store,cfg,{bootstrap:{phase:b.phase+(more?0:1),cursor:more?docs[docs.length-1].id:''},ready:false}))return;
+  }
+ }
+ async function progress(store,cfg,fields){
+  return db.runTransaction(async tx=>{const snap=await tx.get(db.doc(configPath(store)));const cur=snap.exists?snap.data():{};if(!cur.enabled||A.stable(cur)!==A.stable(cfg))return false;tx.set(db.doc(rootPath(store)),fields,{merge:true});return true;});
+ }
+ async function reconcileCounts(store){
+  const ref=db.doc(rootPath(store)),before=await ref.get(),state=before.exists?before.data():{};
+  if(!state.ready||state.countsVerifiedVersion===A.VERSION)return false;
+  const counts={};
+  for(const group of ['approval','working','done','watch','backlog']){
+   const q=db.collection(rootPath(store)+'/cases').where('visible','==',true).where('group','==',group);
+   counts[group]=typeof q.count==='function'?(await q.count().get()).data().count:(await q.get()).docs.length;
+  }
+  return db.runTransaction(async tx=>{const cur=await tx.get(ref);if(!cur.exists||(Number(cur.data().countsRevision)||0)!==(Number(state.countsRevision)||0))return false;
+   tx.set(ref,{counts,countsVerifiedVersion:A.VERSION,policyVersion:A.VERSION},{merge:true});return true;});
+ }
+ async function migrateErrors(store,cfg){
+  const root=db.doc(rootPath(store)),sn=await root.get(),state=sn.exists?sn.data():{};
+  if(state.errorStateVersion===1)return true;
+  const cursor=state.errorMigration?.cursor||'';
+  if(!state.errorMigration?.started){
+   const path=(state.legacySourceError||state.lastSourceError)?.path||'',parts=path.split('/'),parsed=parts.length===2?A.parseCollection(parts[0]):null;
+   if(parsed?.storeId===store){
+    try{await processSource(store,parsed.kind,parts[1]);await setError(db,root,path,'',new Date(now()).toISOString());}
+    catch(e){await setError(db,root,path,String(e.message||e),new Date(now()).toISOString());}
+   }
+   if(!await progress(store,cfg,{errorMigration:{started:true,cursor:''}}))return false;
+  }
+  // One-time legacy scan, at most 100 jobs per tick; never an inbox query.
+  let q=db.collection(rootPath(store)+'/jobs').orderBy(opts.documentId||'__name__');
+  if(cursor)q=q.startAfter(cursor);
+  const jobs=(await q.limit(100).get()).docs;
+  for(const job of jobs){if(!job.data().lastError)continue;
+   await db.runTransaction(async tx=>{const current=await tx.get(job.ref),error=await readError(tx,root,job.ref.path),sum=await tx.get(root),data=current.exists?current.data():{};
+    writeError(tx,error,sum.exists?sum.data():{},data.dirty?data.lastError||'':'',new Date(now()).toISOString());});
+  }
+  if(jobs.length===100){await progress(store,cfg,{errorMigration:{started:true,cursor:jobs[99].id}});return false;}
+  return db.runTransaction(async tx=>{const cs=await tx.get(db.doc(configPath(store))),s=await tx.get(root);if(!cs.exists||A.stable(cs.data())!==A.stable(cfg)||!cs.data().enabled)return false;
+   const count=Number(s.exists?s.data().sourceErrorCount:0)||0;
+   tx.set(root,{errorStateVersion:1,legacySourceError:null,legacyErrorCaptured:true,lastSourceError:count?{path:'',message:count+' nguồn công việc còn lỗi; đang chờ thử lại.',at:new Date(now()).toISOString()}:null},{merge:true});return true;});
+ }
+ async function tickStore(store){
+  const ref=db.doc(rootPath(store)),cfgSnap=await db.doc(configPath(store)).get();
+  const cfg=cfgSnap.exists?cfgSnap.data():{};if(!cfg.enabled)return;
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(cfg.startDate||''))throw Error('Thiếu ngày bắt đầu khởi tạo '+store);
+  const token=crypto.randomUUID();
+  const claimed=await db.runTransaction(async tx=>{const snap=await tx.get(ref),s=snap.exists?snap.data():{};if(Number(s.leaseUntil)>now())return false;tx.set(ref,{leaseUntil:now()+12*60000,leaseToken:token},{merge:true});return true;});
+  if(!claimed)return;
+  try{
+  let sum=await ref.get();
+  if(Number(sum.exists?sum.data().sourceErrorCount:0)>0&&opts.retrySourceErrors)await opts.retrySourceErrors(store);
+  // Re-evaluate existing sources once per policy version, using the bounded,
+  // resumable bootstrap. Merely recounting old cases cannot fix old decisions.
+  if(!sum.exists||sum.data().bootstrapPolicyVersion!==A.VERSION){
+   if(!await progress(store,cfg,{bootstrapPolicyVersion:A.VERSION,bootstrap:{phase:0,cursor:''},ready:false,countsVerifiedVersion:0}))return;
+   sum=await ref.get();
+  }
+  if(!sum.data().ready)await bootstrap(store,cfg);
+  // Only date-driven lot/day checks. No periodic read of every unresolved case or all bills.
+  const due=cfg.mode==='active'&&cfg.fleet20Confirmed===true?await db.collection(rootPath(store)+'/cases').where('nextCheckAt','>',0).where('nextCheckAt','<=',now()).orderBy('nextCheckAt').limit(100).get():{docs:[]};
+  for(const doc of due.docs){const d=doc.data();await processSource(store,d.kind,d.sourceId);}
+  const dirtyDays=await db.collection(rootPath(store)+'/days').where('dirty','==',true).limit(5).get();
+  for(const d of dirtyDays.docs)await buildDay(store,d.id);
+  if(await migrateErrors(store,cfg))await reconcileCounts(store);
+  await progress(store,cfg,{enabled:true,mode:cfg.mode==='active'&&cfg.fleet20Confirmed===true?'active':'shadow',heartbeatAt:new Date(now()).toISOString(),lastError:''});
+  }finally{await db.runTransaction(async tx=>{const snap=await tx.get(ref);if(snap.exists&&snap.data().leaseToken===token)tx.set(ref,{leaseUntil:0,leaseToken:''},{merge:true});});}
+ }
+ // [v5 — cổng tín hiệu] Việc theo giờ của quán còn lại sau một lần kiểm: {enabled, nextDue} — nextDue = hồ sơ có nextCheckAt sớm nhất
+ // (chỉ khi chạy thật), ngày còn dirty / chưa sẵn sàng / còn lỗi nguồn → kiểm lại ngay nhịp sau. 0 = không có việc hẹn.
+ async function due(store){
+  const [cfgSnap,sum]=await Promise.all([db.doc(configPath(store)).get(),db.doc(rootPath(store)).get()]);
+  const cfg=cfgSnap.exists?cfgSnap.data():{};if(!cfg.enabled)return {enabled:false,nextDue:0};
+  const st=sum.exists?sum.data():{};
+  if(!st.ready||st.bootstrapPolicyVersion!==A.VERSION||Number(st.sourceErrorCount)>0||st.errorStateVersion!==1||st.countsVerifiedVersion!==A.VERSION)return {enabled:true,nextDue:1};
+  const dirty=await db.collection(rootPath(store)+'/days').where('dirty','==',true).limit(1).get();if(dirty.docs.length)return {enabled:true,nextDue:1};
+  if(!(cfg.mode==='active'&&cfg.fleet20Confirmed===true))return {enabled:true,nextDue:0};
+  const c=await db.collection(rootPath(store)+'/cases').where('nextCheckAt','>',0).orderBy('nextCheckAt').limit(1).get();
+  return {enabled:true,nextDue:c.docs.length?Number(c.docs[0].data().nextCheckAt)||1:0};
+ }
+ // Dấu «còn sống» ghi mù khi nhịp không có việc cho quán (POS / quanlygieo2 đòi dấu < 60 phút). Chưa có tài liệu → bỏ qua.
+ async function beat(store){try{await db.doc(rootPath(store)).update({heartbeatAt:new Date(now()).toISOString()});return true;}catch(e){if(e&&(e.code===5||e.code==='not-found'||/NOT_FOUND|No document/i.test(e.message||'')))return false;throw e;}}
+ return {processSource,bootstrap,tickStore,markDay,buildDay,reconcileCounts,migrateErrors,due,beat};
+}
+module.exports={createWorker,rootPath,configPath,key,BOOTSTRAP};
