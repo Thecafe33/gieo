@@ -15,7 +15,7 @@ Thư mục deploy có `unit_engine.v22.js` + `DANH_SACH.txt` ngày 12/11, kích 
 
 # 16/11 — GÓI GỘP chờ deploy: `giao_file/dot_16-11_GOP_v22_gaunoel_quanly/` (chủ dự án: 3 đợt chưa deploy sẽ deploy MỘT LƯỢT)
 
-Chủ dự án xác nhận 16/11: `dot_12-11_tru_kho_v22`, `dot_16-11_gau_noel_v4`, `dot_16-11_quanly_gon_sidebar` đều CHƯA deploy → gộp thành một gói (Hosting 48 file lấy từ `ban_deploy/giangsinh/` + Functions 8 file = `functions/automation` hiện hành, trùng gói 12/11). **Sửa thêm file nào thuộc ba đợt này trước khi chủ dự án deploy → phải dựng lại gói gộp** (chép lại từ `ban_deploy/giangsinh/` + `functions/automation/`). Sau khi chủ dự án báo đã deploy: cập nhật CLAUDE.md (kho v22, Engine 2 v5, Gấu Noel v4, quanlygieo gộp = đã phát hành → sửa tiếp phải lên bản mới).
+Chủ dự án xác nhận 16/11: `dot_12-11_tru_kho_v22`, `dot_16-11_gau_noel_v4`, `dot_16-11_quanly_gon_sidebar` đều CHƯA deploy → gộp thành một gói (Hosting 48 file lấy từ `ban_deploy/giangsinh/` + Functions 8 file = `functions/automation` hiện hành, trùng gói 12/11). **Cập nhật 16/11 (chiều): gói đã dựng lại với `manage.html` mới nhất** (nút Duyệt / Xác nhận kiểu tick + popup nhập nhiều ngày tab Tiền mặt); 50 file Hosting, chỉ `manage.html` đổi so với lần dựng trước. `functions/baomat` (Bảo mật đợt 1) KHÔNG nằm trong gói — chưa bắt buộc, chủ dự án tự quyết khi cần. **Sửa thêm file nào thuộc ba đợt này trước khi chủ dự án deploy → phải dựng lại gói gộp** (chép lại từ `ban_deploy/giangsinh/` + `functions/automation/`). Sau khi chủ dự án báo đã deploy: cập nhật CLAUDE.md (kho v22, Engine 2 v5, Gấu Noel v4, quanlygieo gộp = đã phát hành → sửa tiếp phải lên bản mới).
 
 # 16/11 — Quản lý Gieo: quanlygieo2 NHẬP VÀO `quanlygieo.html` (một file gốc) + sidebar gọn (chủ dự án duyệt 16/11) — CHƯA deploy
 
