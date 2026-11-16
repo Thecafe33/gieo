@@ -79,6 +79,38 @@ const server=require('http').createServer((req,res)=>{const f=path.resolve(ROOT,
   check(errors.length===0,width+': không lỗi JS '+errors.join(' | '));
   // Đặt lại dữ liệu cho cỡ màn sau.
   await p.close();
+  // [16/11] Chọn NHIỀU khoản duyệt một lần + duyệt KHÔNG xoá trắng màn (trang mới = dữ liệu giả mới).
+  const q=await b.newPage({viewport:{width,height:900},timezoneId:'Asia/Ho_Chi_Minh'}),err2=[];q.on('pageerror',e=>err2.push(e.message));const hoi=[];
+  q.on('dialog',d=>{hoi.push(d.message());d.accept()});
+  await q.route('**/*',r=>{const u=r.request().url();if(u.includes('firebase-app-compat'))return r.fulfill({contentType:'application/javascript',body:mock});if(u.includes('firebasejs'))return r.fulfill({contentType:'application/javascript',body:''});if(u.startsWith(base+'/'))return r.continue();return r.abort()});
+  await q.goto(base+'/manage.html');await q.waitForFunction(()=>typeof live!=='undefined'&&live.rev&&!live.loadingKey);
+  await q.evaluate(()=>navigate('chiphi'));await q.waitForFunction(()=>!live.loadingKey&&live.ready.chiphi===loadKey());await q.locator('.cost-pending').waitFor();
+  check(await q.locator('.cost-pick-box').count()===4&&await q.locator('#costApproveSel').isDisabled(),width+': mỗi khoản chờ có ô chọn; chưa chọn thì nút duyệt nhiều bị khoá');
+  await q.locator('#costPickAll').check();
+  check((await q.locator('#costApproveSel').innerText()).includes('Duyệt 4 khoản đã chọn'),width+': Chọn tất cả → nút ghi đúng 4 khoản');
+  await q.locator('.cost-pend-row',{hasText:'Sữa'}).locator('.cost-pick-box').uncheck();
+  check((await q.locator('#costApproveSel').innerText()).includes('Duyệt 3 khoản đã chọn')&&!(await q.locator('#costPickAll').isChecked()),width+': bỏ một khoản → còn 3, «Chọn tất cả» tự bỏ');
+  check(await q.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),width+': có ô chọn vẫn không cuộn ngang');
+  check(await q.evaluate(()=>{const b=document.getElementById('costApproveSel').getBoundingClientRect(),p=document.querySelector('.cost-pending').getBoundingClientRect();return b.right<=p.right-8&&b.left>=p.left+8}),width+': nút duyệt nhiều nằm trọn trong khung');
+  // Theo dõi: trong lúc duyệt KHÔNG được có khung «Đang đọc dữ liệu…» và không vẽ lại kèm hiệu ứng vào trang.
+  await q.evaluate(()=>{window.__flash={loading:0,anim:0};new MutationObserver(()=>{if(document.querySelector('#view .live-loading'))__flash.loading++;const pe=document.querySelector('#view>.page-enter');if(pe&&!pe.classList.contains('no-anim'))__flash.anim++}).observe(document.getElementById('view'),{childList:true,subtree:true});window.scrollTo(0,40);window.__y=window.scrollY});
+  await q.locator('#costApproveSel').click();
+  await q.waitForFunction(()=>!live.costBusy&&document.querySelectorAll('.cost-pend-row').length===1&&__FS.expenses_xofa.x1.status==='approved');
+  check(hoi.length===1&&/Duyệt 3 khoản chi đã chọn/.test(hoi[0])&&/175\.000/.test(hoi[0]),width+': hỏi lại một lần kèm số khoản + tổng tiền ('+hoi[0].replace(/\n/g,' ')+')');
+  check(await q.evaluate(()=>__FS.expenses_gieogieo.p1.status==='approved'&&__FS.expenses_gieogieo.p2.status==='approved'&&__FS.expenses_xofa.x1.status==='approved'&&__FS.expenses_gieogieo__gg02.q1.status==='pending_review'),width+': 3 khoản đã chọn được duyệt (Gieo + XOFA), khoản không chọn giữ nguyên');
+  check(await q.evaluate(()=>!!(__FS.pl_dirty_gieogieo&&__FS.pl_dirty_gieogieo.gg01.m[__Y+'_'+__Y])),width+': duyệt nhiều vẫn ghi dấu lãi/lỗ Gieo như duyệt lẻ');
+  check((await q.locator('.cost-pend-row').innerText()).includes('Sữa')&&await q.locator('#costApproveSel').isDisabled(),width+': còn lại đúng khoản chưa chọn, tập chọn đã trống');
+  await q.waitForFunction(()=>live.ready.chiphi===loadKey()&&!live.loadingKey&&/Gas|Đá/.test(document.querySelector('.cost-page').innerText));
+  check(await q.evaluate(()=>__flash.loading===0&&__flash.anim===0),width+': duyệt nhiều KHÔNG hiện «Đang đọc dữ liệu…», không hiệu ứng vào trang ('+JSON.stringify(await q.evaluate(()=>__flash))+')');
+  check(await q.evaluate(()=>window.scrollY===__y),width+': giữ nguyên vị trí cuộn');
+  if(width>760)check(await q.evaluate(()=>[...document.querySelectorAll('.cost-table tbody tr')].every(tr=>{const a=tr.querySelector('.cost-actions'),bs=[...a.querySelectorAll('button')].map(x=>x.getBoundingClientRect());return tr.getBoundingClientRect().height<=64&&bs.every(r=>Math.abs(r.top-bs[0].top)<2)})),width+': bảng khoản chi — nút Sửa / Xoá một hàng, hàng không cao quá 64px');
+  // Duyệt lẻ khoản cuối: cũng tại chỗ.
+  await q.locator('.cost-pend-row',{hasText:'Sữa'}).getByRole('button',{name:'Duyệt'}).click();
+  await q.waitForFunction(()=>__FS.expenses_gieogieo__gg02.q1.status==='approved'&&!document.querySelector('.cost-pending'));
+  await q.waitForTimeout(400);
+  check(await q.evaluate(()=>__flash.loading===0&&__flash.anim===0&&live.ready.chiphi===loadKey()),width+': duyệt lẻ cũng không xoá trắng màn');
+  check(err2.length===0,width+': duyệt nhiều không lỗi JS '+err2.join(' | '));
+  await q.close();
  }}finally{await b.close();server.close()}
  console.log('ALL PASS ('+n+' kiểm)');
 })().catch(e=>{console.error(e);process.exit(1)});

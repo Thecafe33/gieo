@@ -65,6 +65,9 @@ Kiểm tra: `tests/nhan_su_diem_ban.test.js` kiểm tương thích hồ sơ cũ,
 
 Đã rà điều hướng PC/mobile và các form NL/BTP ngày 17/10. Kế hoạch chi tiết: [KE_HOACH_UI_WIDGET_QUANLY.md](KE_HOACH_UI_WIDGET_QUANLY.md). Đã triển khai P0–P5: widget opt-in theo `UI_WIDGET_PAGES`, giữ node/id và các hàm nghiệp vụ, observer childList gom qua rAF, không đọc Firebase. Giữ nguyên Menu/Khuyến mãi và popup của chúng; danh mục NL giữ thẻ/sheet, BTP chia sáu nhóm và gập riêng hướng dẫn dài. Chi tiết mã, phạm vi và kiểm tra xem phần Triển khai trong kế hoạch.
 
+## Sidebar gọn (16/11/2026)
+Chỉ rút danh sách mục, không đổi dáng / màu / nội dung màn. `NAV_SECTIONS`: `one:'Tên dòng'` = cả nhóm vẽ thành MỘT dòng (màn con đi bằng thanh tab báo cáo / thanh tab Kho sẵn có, dòng sáng khi đứng ở bất kỳ màn con nào); `head` = nhãn nhóm in trên sidebar (`''` = không in); `collapsible` = nhóm gập «Ít dùng» (`lessNavOpen` / `toggleLessNav`). Ô tìm Ctrl K vẫn vẽ phẳng mọi mục. Thêm màn mới: đặt vào đúng nhóm; màn ít mở → nhóm «Ít dùng». Kiểm: `node tools/ql_giao_dien/e2e_khung.js` (68 mục). Kế hoạch: [KE_HOACH_THAY_QUANLYGIEO_VA_GON_SIDEBAR_16-11.md](KE_HOACH_THAY_QUANLYGIEO_VA_GON_SIDEBAR_16-11.md).
+
 ## Quy tắc khi sửa tiếp
 1. **Mọi rule giao diện chung nằm trong khối `/* [MANAGE-SKIN:BEGIN] */ … /* [MANAGE-SKIN:END] */`** — khối này là CUỐI `<style>` chính nên thắng mọi khối trên. Sửa nét chung → sửa **trong khối đó**. Test `tests/ql_giao_dien.test.js` báo nếu khối không còn ở cuối hoặc nếu có màu xanh manage lọt vào.
 2. Giữ bảng màu thương hiệu. Ngoại lệ chủ dự án đã yêu cầu 17/10: nền hồng/hai quầng radial, widget lãi/lỗ tím riêng và nhóm vận hành xanh ngọc; không lấy nền xanh của manage.

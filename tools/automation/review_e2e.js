@@ -1,6 +1,6 @@
 // Role-based regressions, using the real quanlygieo2 UI and local Firebase fixtures.
 const {chromium}=require('playwright'),fs=require('fs'),assert=require('node:assert/strict'),path=require('path');
-const root=path.resolve(__dirname,'../..'),code=fs.readFileSync(path.join(__dirname,'ui.js'),'utf8');
+const root=path.resolve(__dirname,'../..'),code=require('./nguon_ui.js').ui;
 const fixture=`
 let scope='gg01',curScreen='inbox',STORE_HEALTH_ISSUE_COUNT=0,QL_ALL=false,dutyTab='digest',dutyFilter='todo',dutyFrom='',dutyTo='',curEntryTab='';
 window.GieoAutomation={VERSION:3};

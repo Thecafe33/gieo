@@ -2,7 +2,7 @@
 // quanlygieo2 › Engine 2 › Kết quả thực thi (05/11 lượt 3): bảng «Engine 2 nhận / POS tự ghi» theo ngày, cảnh báo máy POS chạy cầu nối cũ.
 // Chạy đúng mã nguồn các hàm dựng HTML trong tools/automation/engine2_ui.js (không chép lại) + kiểm quanlygieo2.html đã sinh có chúng.
 const assert=require('node:assert'),fs=require('node:fs'),path=require('node:path');
-const src=fs.readFileSync(path.join(__dirname,'../tools/automation/engine2_ui.js'),'utf8');
+const src=require('../tools/automation/nguon_ui.js').engine2;   // [GỘP 16/11] mã nằm trong quanlygieo.html
 const grab=re=>{const m=re.exec(src);assert(m,'không thấy '+re);return m[0];};
 const body=[/ const FALLBACK=\{[\s\S]*?\};\n/,/ const BRIDGE_NOW=\d+;\n/,/ const bridgeLabel=[^\n]*\n/,/ function fleetWarnHTML\(list\)\{[\s\S]*?\n \}\n/,/ function dailyHTML\(cfg\)\{[\s\S]*?\n \}\n/].map(grab).join('');
 const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -16,7 +16,7 @@ assert(!/<script|onerror/.test(F.dailyHTML({e2Daily:{'<script>':{e2:1}}})),'ngà
 assert.equal(F.fleetWarnHTML([{bridgeVersion:5,ackedAt:now}]),'','mọi máy v5 → không cảnh báo');   // [11/11] cầu nối hiện hành v5 (máy v4 = bản cũ)
 assert(/1 máy POS trong 7 ngày qua còn chạy bản cầu nối cũ/.test(F.fleetWarnHTML([{bridgeVersion:5,ackedAt:now},{ackedAt:now},{ackedAt:'2026-01-01T00:00:00Z'}]))&&/2 máy POS/.test(F.fleetWarnHTML([{bridgeVersion:4,ackedAt:now},{ackedAt:now}])),'máy chưa ghi phiên bản (bản cũ) trong 7 ngày → cảnh báo; máy lâu không mở không tính');
 assert(/cầu nối v5/.test(F.bridgeLabel({bridgeVersion:5}))&&/cầu nối cũ v4/.test(F.bridgeLabel({bridgeVersion:4}))&&/cầu nối cũ</.test(F.bridgeLabel({})));
-const ql2=fs.readFileSync(path.join(__dirname,'../quanlygieo2.html'),'utf8');
-assert(ql2.includes('function dailyHTML(cfg)')&&ql2.includes('function fleetWarnHTML(list)'),'quanlygieo2.html (sinh tự động) có phần mới — chạy tools/sinh_lai_tat_ca.sh');
+const ql2=fs.readFileSync(path.join(__dirname,'../quanlygieo.html'),'utf8');
+assert(ql2.includes('function dailyHTML(cfg)')&&ql2.includes('function fleetWarnHTML(list)'),'quanlygieo.html có phần Engine 2');
 console.log('ok quanlygieo2: bảng Engine 2 nhận / POS tự ghi theo ngày (tỉ lệ, lý do chính, escape); cảnh báo máy POS chạy cầu nối cũ');
 console.log('ALL PASS');
