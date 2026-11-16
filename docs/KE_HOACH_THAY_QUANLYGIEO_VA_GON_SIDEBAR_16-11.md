@@ -1,6 +1,6 @@
 # Kế hoạch: thay `quanlygieo.html` bằng `quanlygieo2.html` + tinh gọn sidebar (16/11/2026)
 
-**Trạng thái (16/11, lượt 2): chủ dự án ĐÃ DUYỆT. Đã làm: gọn sidebar (mục 3) + bước A (mục 2) — CHƯA deploy. Còn lại: bước B, C.**
+**Trạng thái (16/11, lượt 3): XONG TOÀN BỘ, CHƯA deploy.** Chủ dự án yêu cầu làm luôn (quanlygieo2 đã chạy 2 tuần): quanlygieo2 nhập thẳng vào `quanlygieo.html` (một file gốc, bỏ bước sinh — bước A/B/C ở mục 2 gộp làm một lượt, không còn `quanlygieo_cu.html`), `quanlygieo2.html` = trang chuyển hướng; sidebar gọn như mục 3. Chi tiết: mục 16/11 trong `TRANG_THAI.md`.
 Chốt của chủ dự án: giữ tên `quanlygieo.html`; giữ «Dọn dữ liệu»; quanlygieo2 đã chạy ổn và là bản mặc định cùng Unit Engine 2.
 Kết quả khác đề xuất ban đầu: **«Tra cứu» KHÔNG bỏ** — kiểm lại thì nó truy tem ↔ bill ↔ lô (không trùng ô tìm ở Tem NL) và `goContainers('trace')` dẫn tới nó; vẫn nằm trong thanh tab Kho · Tem, lô & sổ. **Đã bỏ khỏi menu: «Mô phỏng», «Ghi chú ngày»** (mã vẽ màn còn trong file, không còn lối vào; dữ liệu `daily_ops_gieogieo` không đụng). Nhóm «Ít dùng» còn 14 mục. Gói giao: `giao_file/dot_16-11_quanly_gon_sidebar/`.
 Ràng buộc chủ dự án nêu 16/11: **không đổi giao diện** (dáng, màu, tên mục, nội dung từng màn giữ nguyên) — chỉ tinh gọn sidebar; mục ít dùng / không dùng thì gom hoặc đề xuất bỏ.

@@ -133,10 +133,10 @@ const server=require('http').createServer((req,res)=>{
   // [GỌN SIDEBAR 16/11] số dòng, nhóm gập «Ít dùng», dòng Kho gộp + thanh tab Kho, mục đã bỏ.
   const rows=()=>p.evaluate(()=>[...document.querySelectorAll('#sidebarNav .sidebar-item')].map(e=>e.textContent.trim()));
   let rw=await rows();
-  chk(rw.length===20&&rw[rw.length-1]==='Ít dùng','desktop: sidebar 19 mục + nhóm «Ít dùng» — quanlygieo2 thêm dòng Tự động & Engine 2 ('+rw.length+')');
+  chk(rw.length===21&&rw[rw.length-1]==='Ít dùng','desktop: sidebar 20 mục + nhóm «Ít dùng» ('+rw.length+')');
   chk(!rw.includes('Tổng kết tháng')&&!rw.includes('Kiểm kê')&&!rw.includes('Dọn dữ liệu'),'desktop: màn con / mục ít dùng không nằm phẳng trên sidebar');
   await p.click('#sidebarNav .sidebar-head'); await p.waitForTimeout(300); rw=await rows();
-  chk(rw.length===34&&rw.includes('Dọn dữ liệu')&&rw.includes('Kiểm toán'),'desktop: mở «Ít dùng» → 14 mục ('+rw.length+')');
+  chk(rw.length===35&&rw.includes('Dọn dữ liệu')&&rw.includes('Kiểm toán'),'desktop: mở «Ít dùng» → 14 mục ('+rw.length+')');
   await p.click('#sidebarNav .sidebar-item:has-text("Dọn dữ liệu")'); await p.waitForTimeout(600);
   chk(await p.evaluate(()=>currentNavKey()==='entry:dondep'&&document.getElementById('hdrTitle').textContent==='Dọn dữ liệu'),'desktop: «Ít dùng» → Dọn dữ liệu mở đúng màn');
   await p.click('#sidebarNav .sidebar-head'); await p.waitForTimeout(300);

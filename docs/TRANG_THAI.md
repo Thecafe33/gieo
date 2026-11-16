@@ -1,10 +1,11 @@
-# 16/11 — Quản lý Gieo: sidebar gọn + bộ deploy dùng quanlygieo2 làm `quanlygieo.html` (chủ dự án duyệt 16/11) — CHƯA deploy
+# 16/11 — Quản lý Gieo: quanlygieo2 NHẬP VÀO `quanlygieo.html` (một file gốc) + sidebar gọn (chủ dự án duyệt 16/11) — CHƯA deploy
 
 [Kế hoạch](KE_HOACH_THAY_QUANLYGIEO_VA_GON_SIDEBAR_16-11.md). Gói giao: `giao_file/dot_16-11_quanly_gon_sidebar/`.
-- **Sidebar** (`quanlygieo.html`, chỉ `NAV_SECTIONS` + `renderSidebarNav`): 51 mục → 20 mục + nhóm gập «Ít dùng» (14 mục). Báo cáo một dòng (thanh tab báo cáo sẵn có), Kho ba dòng (thanh tab Kho sẵn có). Không đổi giao diện / nội dung màn. Bỏ khỏi menu: «Mô phỏng», «Ghi chú ngày»; giữ «Dọn dữ liệu», «Tra cứu».
-- **Bước A**: `tools/tao_bo_deploy.js` — trong `ban_deploy/*`, `quanlygieo.html` = nội dung `quanlygieo2.html`; bản không lớp phủ = `quanlygieo_cu.html` (quay lui). File gốc ở gốc repo không đổi vai — vẫn sửa `quanlygieo.html`, quanlygieo2 vẫn là file sinh.
-- **Còn mở**: bước B (nhập lớp phủ `tools/automation/ui*.js|css` vào file gốc, bỏ `build_page.js`), bước C (gỡ tên `quanlygieo2.html`). Deploy gói này cần posgieo v22 trên máy chủ (cùng engine).
-- Kiểm: `e2e_khung.js` 68/68; `sinh_lai_tat_ca.sh` giữ mốc (6 FAIL test 8, 11 + `gieo_automation_queue` hỏng sẵn).
+- **Một nguồn**: `quanlygieo.html` = nội dung quanlygieo2 đã chạy (so từng dòng; chỉ khác chú thích mốc + dòng menu «Tự động & Engine 2» khai thẳng trong `NAV_SECTIONS`). Lớp phủ chuyển nguyên văn vào file: `<style id="ql-tu-dong">`, khối `[TỰ ĐỘNG-UI]` / `[ENGINE2-UI]`, 6 hàm gốc mang đuôi `…Legacy`. Xoá `tools/automation/{build_page,ui,engine2_ui}.js`, `ui.css`; test / e2e đọc mã qua `tools/automation/nguon_ui.js`. `quanlygieo2.html` = trang chuyển hướng viết tay (không còn là file sinh).
+- **Hệ quả**: `quanlygieo_thu.html` nay có lớp Tự động (dữ liệu trong vùng thử); `check_boundaries` / `check_paths` nay quét cả lớp này (`check_paths` nhận `….base`, `root`, `autoRoot()` là tài liệu gốc → collection con).
+- **Sidebar** (`NAV_SECTIONS` + `renderSidebarNav`): 51 mục → 20 mục + nhóm gập «Ít dùng» (14 mục). Báo cáo một dòng, Kho ba dòng (thanh tab sẵn có). Không đổi giao diện / nội dung màn. Bỏ khỏi menu: «Mô phỏng», «Ghi chú ngày»; giữ «Dọn dữ liệu», «Tra cứu».
+- Deploy cần posgieo v22 trên máy chủ (cùng engine).
+- Kiểm: `e2e_khung.js` 68/68, `automation/{e2e,review_e2e,role_full_e2e,e2e_shift_work}.js` đạt; `sinh_lai_tat_ca.sh` giữ mốc (6 FAIL test 8, 11 + `gieo_automation_queue` hỏng sẵn); ranh giới + đường dẫn sạch.
 
 # 14/11 — Bảo mật: duyệt máy + mã quản lý + đổi mật khẩu ở manage — ĐỢT 1 XONG, CHƯA deploy
 

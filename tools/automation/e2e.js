@@ -1,7 +1,7 @@
 const fs=require('fs'),path=require('path'),assert=require('assert/strict'),{chromium}=require('playwright');
 const root=path.resolve(__dirname,'../..');
-const html=fs.readFileSync(path.join(root,'quanlygieo2.html'),'utf8'),style=html.match(/<style[^>]*>([\s\S]*?)<\/style>/)[1];
-const ui=fs.readFileSync(path.join(__dirname,'ui.js'),'utf8');
+const html=fs.readFileSync(path.join(root,'quanlygieo.html'),'utf8'),style=html.match(/<style[^>]*>([\s\S]*?)<\/style>/)[1]+require('./nguon_ui.js').css;
+const ui=require('./nguon_ui.js').ui;
 const fixture=`
 let scope='gg01',curScreen='inbox',STORE_HEALTH_ISSUE_COUNT=0,QL_ALL=false;
 const counts={summary:0,cases:0,history:0,days:0,writes:0},escapeHtmlAttr=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));

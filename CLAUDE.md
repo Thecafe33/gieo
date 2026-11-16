@@ -5,7 +5,7 @@
 - Mỗi app một file HTML, JS inline + file `*.vN.js` nạp kèm, không build step. Firebase **compat 10.13.2** (Firestore + RTDB + Auth + Storage), project `the-cafe-33`.
 - Host: Firebase Hosting. **Chủ dự án tự deploy, Claude không bao giờ chạy deploy.** Hosting: chép file vào `/sdcard/MyCafeWeb/public/` rồi `firebase deploy --only hosting`; Functions: `cd ~/MyCafeWeb && firebase deploy --only functions:gieo-automation`. Gói giải nén ở `/sdcard/Download/Giải nén codex/<tên gói>/` — đưa lệnh `cp` theo đúng các đường này.
 - Project và thư mục deploy **dùng chung với XOFA và The Cafe 33 (TC33)**. File của hai thương hiệu: không sửa / xoá / di chuyển, **trừ** `pos.html` (POS TC33), `PosX.html` (POS XOFA), `index.html` (app khách TC33), `manage.html` (quản lý TC33-XOFA) — chỉ sửa phần Ca làm việc (`cham_cong.v4.js`) và việc chủ dự án **yêu cầu đích danh** (ghi vào mục «Việc TC33 đã chốt» bên dưới).
-- **File SINH TỰ ĐỘNG — không sửa tay**: `index_giangsinh.html`, `*_tet.html`, `*_thu.html`, `lai_lo.v*.js`, `unit_engine2_params_v1.js`, `quanlygieo2`, mọi thứ trong `ban_deploy/`. Sửa file gốc → `sh tools/sinh_lai_tat_ca.sh`.
+- **File SINH TỰ ĐỘNG — không sửa tay**: `index_giangsinh.html`, `*_tet.html`, `*_thu.html`, `lai_lo.v*.js`, `unit_engine2_params_v1.js`, mọi thứ trong `ban_deploy/`. Sửa file gốc → `sh tools/sinh_lai_tat_ca.sh`.
 
 ## Quy tắc làm việc (bắt buộc)
 1. Trả lời bằng **tiếng Việt**.
@@ -44,7 +44,7 @@
 - Tách posgieo thành `js/posgieo/*.vN.js`: `docs/KE_HOACH_TACH_POSGIEO_DA_CUA_HANG.md` — chỉ chuyển nguyên văn, ưu tiên luồng bán trơn tru.
 - Bản theo mùa: Giáng sinh đang chạy; Tết 2027 (`docs/LIXI_TET_2027.md`). Gấu Noel `gau_noel_giangsinh.v4.js` (16/11, CHƯA deploy — trên máy chủ v3 đang chạy thật; v4 phát theo doanh thu, tự nhận tiếp số đã phát của v3; còn sửa tại chỗ được, sau deploy = v5; luật v4 + hướng dẫn gỡ: `docs/HUONG_DAN_GAU_NOEL.md`). Chế độ thử `docs/CHE_DO_THU.md` — app thật không bao giờ nạp `che_do_thu`.
 - Giao diện quanlygieo: dáng theo manage, **giữ màu hồng `#E23A5D`** (`docs/GIAO_DIEN_QUANLY.md`).
-- **Bản quản lý mặc định = quanlygieo2** (16/11): vẫn sửa `quanlygieo.html` (quanlygieo2 là file sinh); trong `ban_deploy/*` thì `quanlygieo.html` = nội dung quanlygieo2, bản không lớp phủ = `quanlygieo_cu.html`. Sidebar gọn + việc còn lại (bước B, C): `docs/KE_HOACH_THAY_QUANLYGIEO_VA_GON_SIDEBAR_16-11.md`.
+- **quanlygieo2 đã nhập vào `quanlygieo.html`** (16/11, chưa deploy): một file gốc duy nhất, không còn bước sinh. Lớp «Tự động & Engine 2» nằm inline giữa các mốc `[TỰ ĐỘNG-UI]` / `[ENGINE2-UI]` + `<style id="ql-tu-dong">` (test lấy qua `tools/automation/nguon_ui.js`); `quanlygieo2.html` chỉ là trang chuyển hướng. Sidebar gọn (`one` / `head` / `collapsible` trong `NAV_SECTIONS`): `docs/KE_HOACH_THAY_QUANLYGIEO_VA_GON_SIDEBAR_16-11.md`.
 - CLAUDE.md đầy đủ cũ: `docs/luu_tru/CLAUDE_MD_DAY_DU_06-11-2026.md` — chỉ tra cứu.
 
 ## Kiểm tra
