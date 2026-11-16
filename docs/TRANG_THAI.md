@@ -1,3 +1,7 @@
+# 16/11 — manage.html: bảng «Chọn điểm bán» — TC33 / XOFA thành nút chọn (chủ dự án yêu cầu) — CHƯA deploy
+
+The cafe 33 và XOFA mỗi thương hiệu chỉ một điểm → không dựng nhóm + dòng nữa, hiện thành hai nút cùng hàng «Tất cả» / «Toàn bộ Gieo» (nút đang chọn được tô màu thương hiệu). Chỉ Gieo Gieo (nhiều điểm) giữ nhóm + dòng. Ô tìm chỉ hiện khi Gieo có > 6 điểm; tìm kiếm lọc cả nút lẫn danh sách; Enter chọn mục khớp đầu tiên. Ở Chấm công / Lương / Lịch bảng chỉ còn các nút. `setStore` và phạm vi từng tab không đổi. Kiểm: `e2e_store_dropdown.js` 38/38. Gói gộp đã dựng lại.
+
 # 16/11 — manage.html › Chi phí: duyệt NHIỀU khoản một lần + duyệt không xoá trắng màn + bảng khoản chi gọn (chủ dự án yêu cầu) — CHƯA deploy
 
 - **Duyệt nhiều**: mỗi khoản chờ duyệt có ô chọn, «Chọn tất cả», nút «Duyệt N khoản đã chọn» (`approveSelectedExpenses`): hỏi lại một lần kèm số khoản + tổng tiền, rồi duyệt LẦN LƯỢT qua đúng `reviewGieoExpense` / `reviewExpense` cũ (không đổi cách ghi: transaction chống ghi đè + dấu lãi/lỗ Gieo, dựng lại tổng hợp tháng TC33 / XOFA). Khoản lỗi ở lại kèm lý do. Từ chối vẫn từng khoản (cần lý do).

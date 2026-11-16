@@ -590,7 +590,9 @@ html[data-theme="dark"] .bf-pay.is-cash{background:#1f3b2a;color:#86d9a6}html[da
 .store-dropdown .chooser-search{order:0;width:100%;margin:0;flex-shrink:0;min-height:44px;background:var(--panel);border:1px solid var(--line);border-radius:16px;display:flex;gap:9px;padding:0 12px}
 .store-dropdown .chooser-search input{min-width:0;width:100%;font-size:14px;padding:10px 0;background:transparent;color:var(--ink);border:0;outline:none}
 .store-dropdown .chooser-search:focus-within{outline:2px solid var(--green);outline-offset:1px}
-.store-dropdown .chooser-quick{display:flex;gap:6px;margin:0;flex-shrink:0}.store-dropdown .chooser-quick .btn{min-height:38px;padding:8px 12px;font-size:13px}
+.store-dropdown .chooser-quick{display:flex;gap:6px;margin:0;flex-shrink:0;flex-wrap:wrap}.chooser-quick[hidden],.chooser-search[hidden]{display:none}
+.chooser-chip{gap:7px}.chooser-chip .dot{width:8px;height:8px;border-radius:50%;flex:none}
+.chooser-chip[aria-pressed="true"]{border-color:var(--c,var(--green));background:color-mix(in srgb,var(--c,var(--green)) 13%,var(--panel));color:var(--c,var(--green))}.store-dropdown .chooser-quick .btn{min-height:38px;padding:8px 12px;font-size:13px}
 .store-dropdown .store-choices{overflow-y:auto;min-height:0;max-height:none;overscroll-behavior:contain;scrollbar-width:thin;padding:0 3px 0 0}
 .store-dropdown .chooser-group h3{position:static;background:transparent;font-size:12px;margin:10px 4px 6px;display:flex;gap:7px;color:var(--muted)}.store-dropdown .chooser-group h3 span{margin-left:auto}
 .store-dropdown .store-choice{width:100%;display:flex;align-items:center;gap:10px;min-height:58px;padding:9px 10px;margin:3px 0;border-radius:17px;text-align:left;border:1px solid transparent;background:transparent;color:var(--ink)}
@@ -2682,14 +2684,15 @@ function showStoreChooser(brand=null){
   if(event.key==='Escape'){event.preventDefault();event.stopPropagation();closeStoreChooser(true);return}
   const buttons=[...menu.querySelectorAll('button')];let i=buttons.indexOf(document.activeElement);
   if(event.key==='ArrowDown'||event.key==='ArrowUp'){event.preventDefault();i=event.key==='ArrowDown'?(i+1)%buttons.length:(i<=0?buttons.length-1:i-1);buttons[i]?.focus()}
-  if(event.key==='Enter'&&event.target.id==='storeSearch'){event.preventDefault();menu.querySelector('.store-choice')?.click()}
+  if(event.key==='Enter'&&event.target.id==='storeSearch'){event.preventDefault();menu.querySelector('.store-choice,.chooser-chip[data-store]')?.click()}
  });}
- const onlyGieo=brand==='gieo';
- const quick=`${!onlyGieo&&state.view!=='lich'?'<button class="btn secondary" onclick="setStore(\'all\')">Tất cả</button>':''}${state.view==='rev'?'<button class="btn secondary" onclick="setStore(\'brand:gieo\')">Toàn bộ Gieo</button>':''}`;
- menu.innerHTML=`<div class="store-dropdown-head"><b>Chọn điểm bán</b><span id="chooserSummary" aria-live="polite"></span></div><label class="search chooser-search">${icon('search')}<input id="storeSearch" type="search" autocomplete="off" placeholder="Tìm tên, mã hoặc địa chỉ…" aria-label="Tìm cửa hàng" oninput="renderStoreChoices(this.value)"></label><div class="chooser-quick">${quick}</div><div id="storeChoices" class="store-choices"></div>`;
+ // [16/11] The cafe 33 và XOFA mỗi thương hiệu chỉ có MỘT điểm → hiện thành nút chọn ngay (cùng hàng «Tất cả»), không dựng
+ // nhóm + dòng như Gieo Gieo (nhiều điểm). Ô tìm chỉ hiện khi danh sách điểm Gieo dài (> 6). Hàng nút do renderStoreChoices vẽ.
+ const coDanhSach=chooserStores().filter(st=>!chooserIsSingle(st)).length>6;   // danh sách ngắn thì nhìn là thấy, không cần ô tìm
+ menu.innerHTML=`<div class="store-dropdown-head"><b>Chọn điểm bán</b><span id="chooserSummary" aria-live="polite"></span></div><label class="search chooser-search" ${coDanhSach?'':'hidden'}>${icon('search')}<input id="storeSearch" type="search" autocomplete="off" placeholder="Tìm tên, mã hoặc địa chỉ…" aria-label="Tìm cửa hàng" oninput="renderStoreChoices(this.value)"></label><div id="chooserQuick" class="chooser-quick"></div><div id="storeChoices" class="store-choices"></div>`;
  menu.removeAttribute('inert');menu.setAttribute('aria-hidden','false');menu.classList.add('is-open');$('#outletButton').setAttribute('aria-expanded','true');renderStoreChoices('');positionStoreChooser();
  // Focus without opening the phone keyboard until the user taps Search.
- if(matchMedia('(pointer:fine)').matches)$('#storeSearch').focus({preventScroll:true});
+ if(coDanhSach&&matchMedia('(pointer:fine)').matches)$('#storeSearch').focus({preventScroll:true});
  else menu.querySelector('[aria-pressed="true"],button')?.focus({preventScroll:true});
  menu.querySelector('.store-choice[aria-pressed="true"]')?.scrollIntoView({block:'nearest'});
 }
@@ -2714,10 +2717,16 @@ window.addEventListener('blur',()=>clearGieoHold());
 document.addEventListener('click',event=>{if(gieoRelease&&performance.now()<gieoRelease.until&&Math.hypot(event.clientX-gieoRelease.x,event.clientY-gieoRelease.y)<22){event.preventDefault();event.stopImmediatePropagation();gieoRelease=null}},true);
 $('#storeSwitcher').addEventListener('contextmenu',event=>{if(!event.target.closest('[data-gieo-hold]'))return;event.preventDefault();if(!gieoHold?.fired){clearGieoHold();showStoreChooser('gieo')}});
 $('#storeSwitcher').addEventListener('keydown',event=>{if(event.target.closest('[data-gieo-hold]')&&(event.key==='ArrowDown'||event.shiftKey&&event.key==='Enter')){event.preventDefault();clearGieoHold();showStoreChooser('gieo')}});
+// Thương hiệu một điểm (TC33, XOFA; và «Gieo Gieo» gộp ở Nhân viên / Chi phí) = nút chọn; điểm Gieo riêng lẻ = dòng trong nhóm.
+function chooserIsSingle(st){return st.id==='tc33'||st.id==='xofa'||st.id==='gieo'}
 function renderStoreChoices(query){
  const needle=searchFold(query),items=chooserStores().filter(st=>searchFold(st.name+' '+(st.code||'')+' '+(st.location||'')).includes(needle));
- $('#storeChoices').innerHTML=['tc33','xofa','gieo'].map(brand=>{const rows=items.filter(st=>(st.brand||st.id)===brand);if(!rows.length)return '';return `<section class="chooser-group"><h3><i class="dot" style="background:${BRAND_META[brand].c}"></i>${BRAND_META[brand].name}<span>${rows.length}</span></h3>${rows.map(st=>`<button class="store-choice" style="--c:${st.c}" onclick="setStore('${st.id}')" aria-pressed="${state.store===st.id}" aria-label="Chọn ${esc(st.name)}"><span class="picker-mark">${esc(st.code||st.mono||st.id)}</span><span class="store-choice-copy"><b>${esc(st.name)}</b><small>${esc(st.code||st.id.toUpperCase())} · ${st.active===false?'Đã ngừng · có doanh thu trong kỳ':'Đang hoạt động'}</small></span>${icon(state.store===st.id?'check':'chevron')}</button>`).join('')}</section>`}).join('')||'<div class="empty">Không có cửa hàng phù hợp.</div>';
- $('#chooserSummary').textContent=items.length+' kết quả';
+ const chip=(id,ten,c)=>`<button class="btn secondary chooser-chip" ${c?`data-store="${id}" style="--c:${c}"`:''} onclick="setStore('${id}')" aria-pressed="${state.store===id}">${c?`<i class="dot" style="background:${c}"></i>`:''}${esc(ten)}</button>`;
+ const onlyGieo=chooserBrand==='gieo',singles=items.filter(chooserIsSingle),points=items.filter(st=>!chooserIsSingle(st));
+ $('#chooserQuick').innerHTML=(!needle&&!onlyGieo&&state.view!=='lich'?chip('all','Tất cả'):'')+singles.map(st=>chip(st.id,st.name,st.c||BRAND_META[st.id]?.c||'var(--green)')).join('')+(!needle&&state.view==='rev'?chip('brand:gieo','Toàn bộ Gieo'):'');
+ $('#chooserQuick').hidden=!$('#chooserQuick').innerHTML;
+ $('#storeChoices').innerHTML=['tc33','xofa','gieo'].map(brand=>{const rows=points.filter(st=>(st.brand||st.id)===brand);if(!rows.length)return '';return `<section class="chooser-group"><h3><i class="dot" style="background:${BRAND_META[brand].c}"></i>${BRAND_META[brand].name}<span>${rows.length}</span></h3>${rows.map(st=>`<button class="store-choice" style="--c:${st.c}" onclick="setStore('${st.id}')" aria-pressed="${state.store===st.id}" aria-label="Chọn ${esc(st.name)}"><span class="picker-mark">${esc(st.code||st.mono||st.id)}</span><span class="store-choice-copy"><b>${esc(st.name)}</b><small>${esc(st.code||st.id.toUpperCase())} · ${st.active===false?'Đã ngừng · có doanh thu trong kỳ':'Đang hoạt động'}</small></span>${icon(state.store===st.id?'check':'chevron')}</button>`).join('')}</section>`}).join('')||(items.length?'':'<div class="empty">Không có cửa hàng phù hợp.</div>');
+ $('#chooserSummary').textContent=needle?items.length+' kết quả':'';
 }
 
 const BED_LIVE={day:'',generation:0,stop:[],data:{},ready:new Set(),error:'',open:false};

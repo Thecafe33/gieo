@@ -30,6 +30,9 @@ await p.locator('#outletButton').click();await p.waitForTimeout(220);
 check(await p.locator('#storeDropdown.is-open').count()===1,width+': dropdown opens');
 check(await p.evaluate(()=>document.querySelector('#storeSearch').getBoundingClientRect().top<document.querySelector('#storeChoices').getBoundingClientRect().top),width+': search stays above list');
 check(await p.locator('#dialog').evaluate(e=>!e.open),width+': no modal');
+// [16/11] TC33 / XOFA (mỗi thương hiệu một điểm) = nút chọn cùng hàng «Tất cả»; chỉ Gieo Gieo (nhiều điểm) mới là nhóm + dòng.
+check(await p.evaluate(()=>[...document.querySelectorAll('#chooserQuick .chooser-chip')].map(b=>b.textContent.trim()).join('|'))==='Tất cả|The cafe 33|XOFA|Toàn bộ Gieo',width+': hàng nút = Tất cả · The cafe 33 · XOFA · Toàn bộ Gieo');
+check(await p.evaluate(()=>{const g=[...document.querySelectorAll('.chooser-group h3')].map(h=>h.textContent);return g.length===1&&/Gieo Gieo/.test(g[0])&&![...document.querySelectorAll('.store-choice')].some(b=>/The cafe 33|XOFA/.test(b.textContent))}),width+': danh sách chỉ còn nhóm Gieo Gieo');
 check(await p.locator('.store-choice').count()>=16,width+': 16+ stores');
 check(await p.locator('#storeChoices').evaluate(e=>e.scrollHeight>e.clientHeight),width+': bounded scroll');
 const box=await p.locator('#storeDropdown').boundingBox();check(box.x>=0&&box.x+box.width<=width&&box.y+box.height<=850,width+': fits viewport');
@@ -40,5 +43,12 @@ await p.locator('#outletButton').click();await p.locator('#storeSearch').press('
 await p.locator('#outletButton').click();await p.mouse.wheel(0,250);await p.waitForTimeout(200);check(await p.locator('#storeDropdown.is-open').count()===1,width+': scroll does not dismiss');
 await p.screenshot({path:'/workspace/work/store-dropdown/'+width+'.png'});
 await p.locator('#breadcrumb').evaluate(e=>e.click());check(await p.locator('#storeDropdown.is-open').count()===0,width+': outside click closes');
+await p.locator('#outletButton').click();await p.locator('#chooserQuick .chooser-chip',{hasText:'XOFA'}).click();
+check(await p.evaluate(()=>state.store==='xofa')&&await p.locator('#storeDropdown').getAttribute('aria-hidden')==='true',width+': bấm nút XOFA → chọn XOFA, đóng bảng');
+await p.locator('#outletButton').click();check(await p.locator('#chooserQuick .chooser-chip[aria-pressed="true"]').innerText()==='XOFA',width+': nút đang chọn được tô');
+await p.locator('#storeSearch').fill('xofa');check(await p.evaluate(()=>[...document.querySelectorAll('#chooserQuick .chooser-chip')].map(b=>b.textContent.trim()).join('|'))==='XOFA'&&await p.locator('.store-choice').count()===0,width+': tìm «xofa» → còn đúng nút XOFA');
+await p.locator('#storeSearch').press('Enter');check(await p.evaluate(()=>state.store==='xofa'),width+': Enter chọn nút khớp');
+await p.evaluate(()=>navigate('cc'));await p.waitForFunction(()=>!live.loadingKey&&live.ready.cc===loadKey());await p.locator('#outletButton').click();
+check(await p.evaluate(()=>[...document.querySelectorAll('#chooserQuick .chooser-chip')].map(b=>b.textContent.trim()).join('|')==='Tất cả|The cafe 33|XOFA'&&document.querySelector('.chooser-search').hidden&&!document.querySelector('.store-choice')&&!document.querySelector('#storeChoices .empty')),width+': Chấm công — chỉ 3 nút, không ô tìm, không danh sách');
 await p.close();}console.log('ALL PASS '+n)}finally{await b.close();server.close()}
 })().catch(e=>{console.error(e);process.exitCode=1;server.close()});
