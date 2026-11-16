@@ -1,3 +1,10 @@
+# 16/11 — manage.html › Chi phí: duyệt NHIỀU khoản một lần + duyệt không xoá trắng màn + bảng khoản chi gọn (chủ dự án yêu cầu) — CHƯA deploy
+
+- **Duyệt nhiều**: mỗi khoản chờ duyệt có ô chọn, «Chọn tất cả», nút «Duyệt N khoản đã chọn» (`approveSelectedExpenses`): hỏi lại một lần kèm số khoản + tổng tiền, rồi duyệt LẦN LƯỢT qua đúng `reviewGieoExpense` / `reviewExpense` cũ (không đổi cách ghi: transaction chống ghi đè + dấu lãi/lỗ Gieo, dựng lại tổng hợp tháng TC33 / XOFA). Khoản lỗi ở lại kèm lý do. Từ chối vẫn từng khoản (cần lý do).
+- **Không xoá trắng**: trước đây duyệt xong `invalidateViews('chiphi')` → màn về «Đang đọc dữ liệu…» rồi vẽ lại kèm hiệu ứng vào trang. Nay khoản vừa xử lý rời danh sách ngay (`costPendDrop`), số tháng đọc lại ngầm rồi thay vào (`costQuietRefresh`), vẽ tại chỗ giữ vị trí cuộn (`renderKeep`, lớp `no-anim`). Áp cho duyệt + từ chối (lẻ và nhiều); sửa / xoá / số thật giữ đường cũ.
+- **Giao diện**: ô chọn vẽ riêng (bo góc, xanh manage); bảng khoản chi — nút Sửa / Xoá nằm một hàng, hàng thấp lại (trước xuống dòng chồng nhau); ghi chú trống không còn dấu «·» thừa trước «POS».
+- Kiểm: `tools/ql_giao_dien/e2e_manage_duyet_gieo.js` 55/55 (1366 + 390). Gói gộp `dot_16-11_GOP_v22_gaunoel_quanly` đã dựng lại (manage.html mới).
+
 # 16/11 — ĐÍNH CHÍNH: gói `dot_12-11_tru_kho_v22` ĐÃ deploy từ 12/11 (chủ dự án nhớ lại + ảnh thư mục deploy)
 
 Thư mục deploy có `unit_engine.v22.js` + `DANH_SACH.txt` ngày 12/11, kích thước khớp đúng gói 12/11. → **`unit_engine.v22.js`, `gieo_engine2_pos_v5.js`, `unit_engine2_store_v5.js`, `js/posgieo/pos_thanh_toan.v2.js` = ĐÃ PHÁT HÀNH** (sửa tiếp phải lên v23 / v6 / v3). Đã đối chiếu: các file .js này trong repo hiện tại giống hệt gói 12/11 — không có gì bị sửa sau phát hành. Các dòng «CHƯA deploy» của mục 11/11 và 12/11 bên dưới là cũ. **Functions 12/11 cũng đã deploy** (chủ dự án xác nhận 16/11) → gói gộp chỉ còn Hosting. Còn CHƯA deploy: Gấu Noel v4, quanlygieo gộp + sidebar gọn (đều nằm trong gói gộp; file đợt 12/11 trong gói chép đè lại vô hại).
