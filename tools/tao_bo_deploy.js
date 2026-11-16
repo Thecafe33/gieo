@@ -15,24 +15,26 @@ const rd = f => fs.readFileSync(path.join(ROOT, f), 'utf8');
 const giu = f => () => rd(f), go = f => () => boGauNoel(rd(f));
 
 // tên trong bộ → cách lấy nội dung
-const CHUNG = { 'quanlygieo2.html': giu('quanlygieo2.html'), 'kiem_toan_kho.html': giu('kiem_toan_kho.html'), 'quanlygieo.html': giu('quanlygieo.html'), 'manage.html': giu('manage.html'), 'quanlygieo_thu.html': giu('quanlygieo_thu.html') };
+// [GỘP 16/11 — docs/KE_HOACH_THAY_QUANLYGIEO_VA_GON_SIDEBAR_16-11.md] quanlygieo2 đã nhập vào quanlygieo.html (một nguồn).
+// quanlygieo2.html chỉ còn là trang chuyển hướng về quanlygieo.html (lối tắt cũ vẫn chạy).
+const CHUNG = { 'quanlygieo2.html': giu('quanlygieo2.html'), 'kiem_toan_kho.html': giu('kiem_toan_kho.html'), 'quanlygieo.html': giu('quanlygieo.html'), 'quanlygieo_thu.html': giu('quanlygieo_thu.html') };
 const BO = {
   thuong: Object.assign({}, CHUNG, {
     'pos.html': go('pos.html'), 'PosX.html': go('PosX.html'), 'posgieo.html': go('posgieo.html'), 'posgieo_thu.html': go('posgieo_thu.html'),
-    'kiosk.html': go('kiosk.html'), 'index.html': giu('index.html')
+    'kiosk.html': go('kiosk.html'), 'index.html': giu('index.html'), 'manage.html': go('manage.html')
   }),
   giangsinh: Object.assign({}, CHUNG, {
     'pos.html': giu('pos.html'), 'PosX.html': giu('PosX.html'), 'posgieo.html': giu('posgieo.html'), 'posgieo_thu.html': giu('posgieo_thu.html'),
-    'kiosk.html': giu('kiosk.html'), 'index.html': giu('index_giangsinh.html')
+    'kiosk.html': giu('kiosk.html'), 'index.html': giu('index_giangsinh.html'), 'manage.html': giu('manage.html')
   }),
   tet: Object.assign({}, CHUNG, {
     'pos.html': giu('pos_tet.html'), 'PosX.html': giu('PosX_tet.html'), 'posgieo.html': go('posgieo.html'), 'posgieo_thu.html': go('posgieo_thu.html'),
-    'kiosk.html': go('kiosk.html'), 'index.html': giu('index_tet.html')
+    'kiosk.html': go('kiosk.html'), 'index.html': giu('index_tet.html'), 'manage.html': go('manage.html')
   })
 };
 const MO_TA = {
   thuong: 'BẢN BÌNH THƯỜNG — không Gấu Noel, không lì xì',
-  giangsinh: 'BẢN GIÁNG SINH 2026 — Gấu Noel (pos / PosX / posgieo / kiosk) + index Giáng sinh',
+  giangsinh: 'BẢN GIÁNG SINH 2026 — Gấu Noel (pos / PosX / posgieo / kiosk / manage) + index Giáng sinh',
   tet: 'BẢN TẾT 2027 — lì xì (pos / PosX / index Tết), không Gấu Noel'
 };
 

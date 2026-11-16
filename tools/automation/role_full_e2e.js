@@ -26,7 +26,7 @@ const server=http.createServer((req,res)=>{const p=path.resolve(root,'.'+new URL
 (async()=>{await new Promise(r=>server.listen(0,'127.0.0.1',r));const base='http://127.0.0.1:'+server.address().port,b=await chromium.launch({executablePath:['/usr/bin/chromium','/opt/pw-browsers/chromium'].find(p=>fs.existsSync(p)),args:['--no-sandbox']});try{
  for(const width of [1366,390]){const page=await b.newPage({viewport:{width,height:900}}),errors=[];page.on('pageerror',e=>errors.push(e.message));page.on('dialog',d=>d.dismiss());
  await page.route('**/*',r=>{const url=r.request().url();if(url.includes('firebase-app-compat'))return r.fulfill({contentType:'application/javascript',body:mock});if(url.includes('firebasejs'))return r.fulfill({body:''});if(url.startsWith(base+'/'))return r.continue();return r.abort()});
- await page.goto(base+'/quanlygieo2.html');await page.waitForTimeout(800);await page.evaluate(()=>switchScreen('inbox'));
+ await page.goto(base+'/quanlygieo.html');await page.waitForTimeout(800);await page.evaluate(()=>switchScreen('inbox'));
  await page.getByRole('heading',{name:'Chi phí nước đá',exact:true}).waitFor();assert((await page.locator('.auto-case').innerText()).includes('35.000'));
  if(process.env.SCREENSHOT_DIR){fs.mkdirSync(process.env.SCREENSHOT_DIR,{recursive:true});await page.screenshot({path:path.join(process.env.SCREENSHOT_DIR,'inbox-'+width+'.png')});}
  await page.evaluate(()=>autoOpenTab('working'));await page.getByRole('heading',{name:'Tem nguyên liệu Sữa cần kiểm tra'}).waitFor();await page.getByRole('button',{name:'Mở nghiệp vụ'}).click();await page.locator('#ctnDetailBody').getByText('ABC123',{exact:false}).first().waitFor();

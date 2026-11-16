@@ -85,7 +85,10 @@ for (const hostFile of FILES) {
       if (p === 'child') return;   // con của một ref đã được ánh xạ ở gốc
       if (p === 'ref' && /(^|\.)units$/.test(objSrc)) return;   // UnitEngine.units.ref(itemId) — API engine, bên trong gọi db.ref đã bọc
       // collection gọi trên DocumentReference (…doc(x).collection('sub')) = collection con → nằm dưới gốc đã ánh xạ
-      if (p === 'collection' && /\.doc\(|\.ref$|\bref\b|Ref$/.test(objSrc) && !/^(fstore|C\.fstore|this\.fstore|fs|db)$/.test(objSrc)) return;
+      // [GỘP 16/11] «….base» = tài liệu gốc của UnitEngine2Store (coll('duty_digests').doc('_engine2')) — collection con của nó
+      // (models, obs…) cũng nằm dưới gốc đã ánh xạ. Mã Engine 2 của quanlygieo nay nằm trong file gốc nên mới được quét.
+      // «root» / «autoRoot()» = tài liệu fstore.collection('duty_digests_gieogieo').doc('_automation') (cases, days… là collection con).
+      if (p === 'collection' && /\.doc\(|\.ref$|\bref\b|Ref$|\.base$|^root$|^autoRoot\(\)$/.test(objSrc) && !/^(fstore|C\.fstore|this\.fstore|fs|db)$/.test(objSrc)) return;
       if (p === 'doc' && !/^(fstore|C\.fstore)$/.test(objSrc)) return;   // .doc() của collection — không phải fstore.doc(path)
       if (p === 'ref' && !n.arguments.length) { dynamic.push({ file, line, how: 'ref() không đối số (gốc)', src: code.slice(n.start, Math.min(n.end, n.start + 90)) }); return; }
       const kind = p === 'ref' ? (/storage|\bst\b|stor/i.test(objSrc) ? 'st' : 'rt') : 'fs';

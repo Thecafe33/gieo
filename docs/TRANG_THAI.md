@@ -1,3 +1,38 @@
+# 16/11 — manage.html: bảng «Chọn điểm bán» — TC33 / XOFA thành nút chọn (chủ dự án yêu cầu) — CHƯA deploy
+
+The cafe 33 và XOFA mỗi thương hiệu chỉ một điểm → không dựng nhóm + dòng nữa, hiện thành hai nút cùng hàng «Tất cả» / «Toàn bộ Gieo» (nút đang chọn được tô màu thương hiệu). Chỉ Gieo Gieo (nhiều điểm) giữ nhóm + dòng. Ô tìm chỉ hiện khi Gieo có > 6 điểm; tìm kiếm lọc cả nút lẫn danh sách; Enter chọn mục khớp đầu tiên. Ở Chấm công / Lương / Lịch bảng chỉ còn các nút. `setStore` và phạm vi từng tab không đổi. Kiểm: `e2e_store_dropdown.js` 38/38. Gói gộp đã dựng lại.
+
+# 16/11 — manage.html › Chi phí: duyệt NHIỀU khoản một lần + duyệt không xoá trắng màn + bảng khoản chi gọn (chủ dự án yêu cầu) — CHƯA deploy
+
+- **Duyệt nhiều**: mỗi khoản chờ duyệt có ô chọn, «Chọn tất cả», nút «Duyệt N khoản đã chọn» (`approveSelectedExpenses`): hỏi lại một lần kèm số khoản + tổng tiền, rồi duyệt LẦN LƯỢT qua đúng `reviewGieoExpense` / `reviewExpense` cũ (không đổi cách ghi: transaction chống ghi đè + dấu lãi/lỗ Gieo, dựng lại tổng hợp tháng TC33 / XOFA). Khoản lỗi ở lại kèm lý do. Từ chối vẫn từng khoản (cần lý do).
+- **Không xoá trắng**: trước đây duyệt xong `invalidateViews('chiphi')` → màn về «Đang đọc dữ liệu…» rồi vẽ lại kèm hiệu ứng vào trang. Nay khoản vừa xử lý rời danh sách ngay (`costPendDrop`), số tháng đọc lại ngầm rồi thay vào (`costQuietRefresh`), vẽ tại chỗ giữ vị trí cuộn (`renderKeep`, lớp `no-anim`). Áp cho duyệt + từ chối (lẻ và nhiều); sửa / xoá / số thật giữ đường cũ.
+- **Giao diện**: ô chọn vẽ riêng (bo góc, xanh manage); bảng khoản chi — nút Sửa / Xoá nằm một hàng, hàng thấp lại (trước xuống dòng chồng nhau); ghi chú trống không còn dấu «·» thừa trước «POS».
+- Kiểm: `tools/ql_giao_dien/e2e_manage_duyet_gieo.js` 55/55 (1366 + 390). Gói gộp `dot_16-11_GOP_v22_gaunoel_quanly` đã dựng lại (manage.html mới).
+
+# 16/11 — ĐÍNH CHÍNH: gói `dot_12-11_tru_kho_v22` ĐÃ deploy từ 12/11 (chủ dự án nhớ lại + ảnh thư mục deploy)
+
+Thư mục deploy có `unit_engine.v22.js` + `DANH_SACH.txt` ngày 12/11, kích thước khớp đúng gói 12/11. → **`unit_engine.v22.js`, `gieo_engine2_pos_v5.js`, `unit_engine2_store_v5.js`, `js/posgieo/pos_thanh_toan.v2.js` = ĐÃ PHÁT HÀNH** (sửa tiếp phải lên v23 / v6 / v3). Đã đối chiếu: các file .js này trong repo hiện tại giống hệt gói 12/11 — không có gì bị sửa sau phát hành. Các dòng «CHƯA deploy» của mục 11/11 và 12/11 bên dưới là cũ. **Functions 12/11 cũng đã deploy** (chủ dự án xác nhận 16/11) → gói gộp chỉ còn Hosting. Còn CHƯA deploy: Gấu Noel v4, quanlygieo gộp + sidebar gọn (đều nằm trong gói gộp; file đợt 12/11 trong gói chép đè lại vô hại).
+
+# 16/11 — GÓI GỘP chờ deploy: `giao_file/dot_16-11_GOP_v22_gaunoel_quanly/` (chủ dự án: 3 đợt chưa deploy sẽ deploy MỘT LƯỢT)
+
+Chủ dự án xác nhận 16/11: `dot_12-11_tru_kho_v22`, `dot_16-11_gau_noel_v4`, `dot_16-11_quanly_gon_sidebar` đều CHƯA deploy → gộp thành một gói (Hosting 48 file lấy từ `ban_deploy/giangsinh/` + Functions 8 file = `functions/automation` hiện hành, trùng gói 12/11). **Cập nhật 16/11 (chiều): gói đã dựng lại với `manage.html` mới nhất** (nút Duyệt / Xác nhận kiểu tick + popup nhập nhiều ngày tab Tiền mặt); 50 file Hosting, chỉ `manage.html` đổi so với lần dựng trước. `functions/baomat` (Bảo mật đợt 1) KHÔNG nằm trong gói — chưa bắt buộc, chủ dự án tự quyết khi cần. **Sửa thêm file nào thuộc ba đợt này trước khi chủ dự án deploy → phải dựng lại gói gộp** (chép lại từ `ban_deploy/giangsinh/` + `functions/automation/`). Sau khi chủ dự án báo đã deploy: cập nhật CLAUDE.md (kho v22, Engine 2 v5, Gấu Noel v4, quanlygieo gộp = đã phát hành → sửa tiếp phải lên bản mới).
+
+# 16/11 — Quản lý Gieo: quanlygieo2 NHẬP VÀO `quanlygieo.html` (một file gốc) + sidebar gọn (chủ dự án duyệt 16/11) — CHƯA deploy
+
+[Kế hoạch](KE_HOACH_THAY_QUANLYGIEO_VA_GON_SIDEBAR_16-11.md). Gói giao: `giao_file/dot_16-11_quanly_gon_sidebar/`.
+- **Một nguồn**: `quanlygieo.html` = nội dung quanlygieo2 đã chạy (so từng dòng; chỉ khác chú thích mốc + dòng menu «Tự động & Engine 2» khai thẳng trong `NAV_SECTIONS`). Lớp phủ chuyển nguyên văn vào file: `<style id="ql-tu-dong">`, khối `[TỰ ĐỘNG-UI]` / `[ENGINE2-UI]`, 6 hàm gốc mang đuôi `…Legacy`. Xoá `tools/automation/{build_page,ui,engine2_ui}.js`, `ui.css`; test / e2e đọc mã qua `tools/automation/nguon_ui.js`. `quanlygieo2.html` = trang chuyển hướng viết tay (không còn là file sinh).
+- **Hệ quả**: `quanlygieo_thu.html` nay có lớp Tự động (dữ liệu trong vùng thử); `check_boundaries` / `check_paths` nay quét cả lớp này (`check_paths` nhận `….base`, `root`, `autoRoot()` là tài liệu gốc → collection con).
+- **Sidebar** (`NAV_SECTIONS` + `renderSidebarNav`): 51 mục → 20 mục + nhóm gập «Ít dùng» (14 mục). Báo cáo một dòng, Kho ba dòng (thanh tab sẵn có). Không đổi giao diện / nội dung màn. Bỏ khỏi menu: «Mô phỏng», «Ghi chú ngày»; giữ «Dọn dữ liệu», «Tra cứu».
+- Deploy cần posgieo v22 trên máy chủ (cùng engine).
+- Kiểm: `e2e_khung.js` 68/68, `automation/{e2e,review_e2e,role_full_e2e,e2e_shift_work}.js` đạt; `sinh_lai_tat_ca.sh` giữ mốc (6 FAIL test 8, 11 + `gieo_automation_queue` hỏng sẵn); ranh giới + đường dẫn sạch.
+
+# 14/11 — Bảo mật: duyệt máy + mã quản lý + đổi mật khẩu ở manage — ĐỢT 1 XONG, CHƯA deploy
+
+[Kế hoạch + nhật ký](KE_HOACH_BAO_MAT_BACKEND_14-11.md). Chủ dự án: bảo mật chưa phải ưu tiên — **làm sẵn, không bắt buộc gì cho tới khi tự đổi mật khẩu**; khoá Google Sheets trong `pos.html` giữ nguyên; **kiosk đứng ngoài** (giữ đăng nhập cũ).
+- **Xong (chưa deploy):** `functions/baomat/` (hàm HTTP `gieoBaoMat`, collection `may_duoc_duyet`; codebase riêng `gieo-baomat`); `manage.html` mục «Bảo mật» — thẻ màu từng quán chứa máy chờ duyệt / đang dùng + mã quản lý hiện sẵn (`cau_hinh_bao_mat/ma_quan_ly`), đổi mật khẩu tài khoản quản lý; `ensureAuth` của manage dùng phiên đã lưu, mật khẩu đã đổi thì hỏi một lần. Kiểm: `tests/bao_mat_duyet_may.test.js`, `tests/manage_bao_mat.test.js`, `tools/ql_giao_dien/e2e_manage_bao_mat.js`.
+- **Chưa làm:** đợt 2 — posgieo / PosX đọc mã quản lý từ cấu hình (`ma_quan_ly.v1.js`; hiện mã đặt ở manage chưa có tác dụng ở POS); đợt 3–4 — `kich_hoat_may.v1.js` cho 5 app (máy cũ tự chuyển, máy mới hiện mã chờ duyệt).
+- **Khi deploy đợt 1 chủ dự án cần (một lần):** thêm codebase `gieo-baomat` vào `~/MyCafeWeb/firebase.json`; gán vai trò Service Account Token Creator cho tài khoản chạy function.
+
 # 13/11 — pos.html (TC33): tab Quản lý viết lại giao diện kiểu bento tối giản (chủ dự án duyệt mẫu v3 12/11) — CHƯA deploy
 
 Mẫu duyệt: `docs/mau/mau_quanly_tc33_bento_v3.html` (v1 / v2 giữ để so). Chỉ giao diện — không đổi dữ liệu / luồng lưu. Gói giao: `giao_file/dot_13-11_pos_quanly/`.
@@ -28,6 +63,10 @@ Mẫu duyệt: `docs/mau/mau_quanly_tc33_bento_v3.html` (v1 / v2 giữ để so)
 # 08/11 — manage: tab «Điểm khách hàng» (sửa điểm / tem 1 khách + dọn điểm khách lâu không đến) — CHƯA deploy
 
 `manage.html` (+ 3 bản `ban_deploy/*/manage.html`), test `tests/manage_diem_khach.test.js`. Ghi thẳng giá trị các trường có sẵn của `customers` (`total_points`, `stamp_count`, `free_drink_available` + mảng `stamp_prices` / `free_drink_caps` cho khớp posgieo), không đổi cấu trúc. Mỗi lần sửa ghi 1 dòng `customer_adjust_logs_gieogieo` (số trước + giờ; sửa 1 khách có thêm số sau). Dọn hàng loạt: lọc theo số tháng không ghé + tick loại (Point / Tem / Ly free), khách vừa ghé lại sau lúc xem danh sách bị bỏ qua. Tab không tự đọc cả bảng khách: tìm SĐT = 1 lượt đọc, «Tải danh sách khách» ≈ 1 lần đọc cả bảng. Lưu ý: gợi ý SĐT của POS (`customer_ac_cache_gieogieo`) giữ `total_points` cũ tới lần làm mới kế tiếp. Khi TĂNG tem / ly: phần thêm xếp CUỐI danh sách (đổi sau tem / ly thật của khách), có ô nhập giá tem thêm (mặc định 16K) / trần ly thêm (mặc định 19K); giảm thì bỏ phần cũ nhất như POS. Trần ly thật của khách = trung bình 6 giá tem + 3K (19K chỉ là mức cho tem không có giá). Chưa có nút khôi phục từ lịch sử.
+
+# 16/11 — Gấu Noel v4: phát theo doanh thu, nhận tiếp số liệu v3 — CHƯA deploy
+
+**Chủ quán chốt 16/11 → `gau_noel_giangsinh.v4.js`** (v3 giữ nguyên trên hosting; pos / PosX / posgieo / kiosk / index Giáng sinh trỏ v4). Bỏ 29 ô kho theo chặng × mức giá (trần «Trước 23» khoá cả mức giá — vd. TC33 lượt 45–59K hết từ tuần mở màn). Luật mới: lượt theo cặp 2 ly (bill lẻ bỏ ly giá giữa, tối đa 3 lượt), tỉ lệ trúng ∝ lãi cặp; tỉ lệ «gấu / đồng lãi» của quán đặt lại mỗi ngày = gấu còn × 17K ÷ (lãi TB × ngày còn), đổi ≤ ±15%/ngày → gấu theo doanh thu từng ngày, phát hết kho tới 25/12; ống may mắn 4% lãi cặp (đủ 17K → chắc trúng) thay «trượt 5 lượt + đủ lãi»; bill 6 ly / bed 160K giữ; 23–25/12 giữ 20% kho, cứ 5 bill ≥ 4 ly thì 1 bill nhường gấu cho bill 2 ly; tuần trước phát thiếu dự kiến ≥ 3 → T2 & T4 ×2 (tab Gấu báo + lời quảng cáo); nhịp đông khách (chỉ lượt quay tại quầy, XOFA 5 / Gieo 4 bill trong 10 phút, các bill trước đều trượt) xét lúc MỞ lượt (`GauNoel.mo(sdt, id, true)`); nạp thêm gấu do quản lý tự nhập. Lần đầu v4 chạm quán: còn = tong − phat (v3) → 80% / 20%. Tab Gấu (pos): giữ CSS v3, thay bảng kho bằng «Phát theo doanh thu», danh sách khách 15 gần nhất / đã trúng / chưa trúng + lọc + tên khách (chỉ đọc hồ sơ của dòng đang hiện), kho = tổng + Nạp thêm. App khách KHÔNG hiện cơ chế (ống may mắn, 6 ly chắc trúng — bỏ câu «Đơn từ 6 ly chắc chắn có gấu!» của v3). Test `tests/gau_noel_v4.test.js`; e2e `tools/gau_noel/e2e_gau.js` 85/85. Mẫu đã duyệt: tab Gấu v4 (artifact). **manage:** mục «Gấu Noel» trong menu (chỉ bản Giáng sinh — bản thường / Tết tự gỡ thẻ), vẽ đúng tab Gấu của pos, dùng kết nối Firebase mặc định của trang; e2e `tools/gau_noel/e2e_manage_gau.js`. Cần deploy: `gau_noel_giangsinh.v4.js` + pos / PosX / posgieo / kiosk / manage + index Giáng sinh — mọi file ở `ban_deploy/giangsinh/`.
 
 # 10/11 — Gấu Noel: rà 3 POS + app khách trước ngày bắt đầu 15/11 — SỬA XOFA không bốc được lượt (thiếu mã bill) — CHƯA deploy
 

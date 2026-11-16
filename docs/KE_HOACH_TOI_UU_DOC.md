@@ -166,6 +166,30 @@ Mỗi bước: **phản biện → báo → sửa → test → tạo bản `_thu
 
 ---
 
+## 4b. Rà lại đường đi dữ liệu 16/11 (sau khi gộp quanlygieo2) — CHỈ RÀ, chưa sửa, chờ chủ dự án chọn
+
+Cách đo: dựng `quanlygieo.html` với Firebase giả, đếm **lời gọi** đọc / ghi theo từng màn + hàm gọi (không phải số tài liệu — dữ liệu giả rỗng nên không suy ra lượt đọc tính tiền; muốn số thật vẫn phải đo bằng `quanlygieo_dem.html`). POS: đọc mã luồng thanh toán + đếm điểm gọi.
+
+**Còn nguyên từ kế hoạch gốc:** T4 (POS còn 13 chỗ `inventory_items.get()` + 7 chỗ `prep_items.get()` đọc cả danh mục — riêng kết ca gọi ~5 lần; Quản lý `MEMO_TTL` vẫn 20 giây), T5, T6 chưa làm.
+
+**Lời gọi trùng trong CÙNG một lượt vẽ (Quản lý)** — cùng dữ liệu, mỗi hàm tính tự đọc:
+- Kho › Tổng quan: `k2TemLoad` và `computeStoreHealth` cùng bắn 3 truy vấn `stock_containers` y hệt (review / open / unlabeled) → 6 thay vì 3.
+- Hôm nay: `loadEmployees` ×2, `loadAssetsAll` ×2 (`renderToday` + `computeCapitalRecovery`), ca hôm nay ×2 (`computeActualLaborCostByDate` + `computeStaffHoursByHour`), lịch hôm nay ×2.
+- Hôm nay · Vận hành / Tiền mặt: `daily_openings` + `daily_closings` của cùng ngày đọc 2 lần (`renderTodayOps` + `computeCashBreakdownForDate`).
+- Tài chính / Lương: `loadEmployees` 2–3 lần, `employee_shifts` cùng khoảng 2 lần.
+- Bán hàng / Tổng kết tháng: đọc lại 6 danh mục (định mức, topping, bao bì…) đã nạp lúc mở app.
+- Bán hàng / Khách hàng / Tổng kết tháng: `fetchOrdersForDate` không giữ bill ngày ĐÃ QUA trong phiên → mỗi màn tải lại cả khoảng ngày.
+
+**Cơ chế đã có trong app, chỉ cần dùng rộng hơn (không bẻ đường dữ liệu):**
+1. Gộp lời gọi đang chạy (single-flight) — đã có ở `loadSchedulesForRange` (`_payScheduleReads`), `loadNewAlerts`, `_expMemo`. Áp cho: `loadEmployees`, `loadAssetsAll`, `loadDailyOpening/Closing`, `loadContainersFor`, `loadExpenseCategories`, ca theo khoảng.
+2. Đệm sống bằng listener — đã có ở POS (`_posLiveSubscribe`). Áp cho danh mục nhỏ ở Quản lý thay `MEMO_TTL` 20 giây (trả lời luôn Q4), và cho `inventory_items` / `prep_items` ở POS (T4).
+3. Giữ bill ngày đã qua trong phiên (ngày hôm nay vẫn qua `BillLive`).
+4. Ghi gộp: `writeCachedDay` ghi từng ngày một lời gọi → một `batch`.
+
+**Luồng thanh toán POS** (`confirmPay`): 5–7 vòng mạng NỐI TIẾP trước khi giỏ được dọn (kiểm bill → số bill → ghi bill → giành quyền việc phụ → tem → ly tặng → đánh dấu xong). Lượt đọc ít; cái tốn là thời gian chờ. Đổi thứ tự (dọn giỏ ngay sau khi bill ghi xong, việc phụ chạy nền + chạy nốt khi mở app như F4) = đổi luồng bán → chỉ làm khi chủ dự án duyệt.
+
+**Không nên:** đổi 4 truy vấn `prep_batches` của «Hoạt động BTP» thành 1 theo `businessDate` (lô nấu hôm trước xong hôm nay sẽ sót); gom ghi `currentStock` theo đợt trong engine (engine đã phát hành, đụng B1/B3).
+
 ## 5. Câu hỏi cần chủ dự án trả lời
 
 | # | Câu hỏi | Cần trước |

@@ -26,7 +26,7 @@ ok(ctx.lichViewDate === '2026-10-03' && ctx.bulkLichDraft.employeeId === 'e1' &&
   && calls.some(c => c[0] === 'go' && c[1] === 'lich') && calls[0][0] === 'close', 'bấm ngày → mở Lịch đúng ngày, điền sẵn người/khoảng ngày, đóng sheet');
 ctx.lai('2026-10'); ok(calls.some(c => c[0] === 'chot' && c[1] === '2026-10'), 'kiểm tra lại gọi chốt sổ lần nữa');
 // nối vào chotSoThang; chốt sổ vẫn chặt
-for (const f of ['quanlygieo.html', 'quanlygieo2.html']) {
+for (const f of ['quanlygieo.html']) {
   const s = fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
   const i = s.indexOf('async function chotSoThang('), body = s.slice(i, s.indexOf('async function moLaiThang', i));
   ok(/err\.code==='pay\/schedule-missing'[\s\S]{0,300}chotSoHienCaThieuLich\(monthKey\)/.test(body) && !/lenient/.test(body), f + ': chotSoThang bắt pay/schedule-missing → liệt kê; bản thân chốt sổ không lenient');

@@ -67,7 +67,7 @@ async function browser(){
  try{
  const fixtureText=fs.readFileSync(path.join(__dirname,'review_e2e.js'),'utf8').match(/const fixture=`([\s\S]*?)`;/)[1];
  const p=await b.newPage();await p.route('**/*',r=>r.abort());await p.setContent('<main><div id="inboxBody"></div><div id="todayHealth"></div><div id="sheet"></div></main>');
- await p.addScriptTag({content:fixtureText});await p.addScriptTag({content:fs.readFileSync(path.join(__dirname,'ui.js'),'utf8')});
+ await p.addScriptTag({content:fixtureText});await p.addScriptTag({content:require('./nguon_ui.js').ui});
  // Exercise the original caller too: it passes its cached array to the new UI.
  await p.addScriptTag({content:extractRaw('quanlygieo.html',['markAlertStatus'])});
  const observed=await p.evaluate(async()=>{
