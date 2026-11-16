@@ -10,7 +10,7 @@ Phần gắn vào app và cách gỡ chương trình **giữ nguyên như v3** (
 | Mức giá lượt | tổng tiền nước ÷ số lượt, 4 mức cứng | giá 1 cặp; tỉ lệ trúng tỉ lệ thuận với lãi cặp (giá cặp − 17,8K) |
 | Kho | 29 ô: 4 mức × 7 chặng + số gấu thật | 1 số / quán + Nạp thêm (quản lý tự quyết) |
 | Nhịp phát | trần từng chặng + trần «trước 23» | tỉ lệ «gấu / đồng lãi» đặt lại mỗi ngày = gấu còn × 17K ÷ (lãi TB × ngày còn), đổi ≤ ±15%/ngày → gấu theo doanh thu từng ngày, phát hết kho tới 25/12 |
-| Chắc trúng theo khách | trượt 5 lượt + đủ lãi 113K | ống may mắn: mỗi lượt +4% lãi cặp, đủ 17K → chắc trúng (app khách thấy thanh «Tích luỹ may mắn») |
+| Chắc trúng theo khách | trượt 5 lượt + đủ lãi 113K | ống may mắn: mỗi lượt +4% lãi cặp, đủ 17K → chắc trúng (KHÔNG hiện cho khách — cơ chế nội bộ, chỉ quản lý thấy trong tab Gấu) |
 | 23–25/12 | trần riêng từng ngày, 4 ly chắc trúng | giữ 20% kho; 4 ly vẫn chắc trúng, nhưng cứ 5 bill thì 1 bill nhường gấu cho bill 2 ly |
 | Khuyến mãi tuần | — | tuần trước phát thiếu dự kiến ≥ 3 gấu → Thứ 2 & Thứ 4 tuần này tỉ lệ ×2; tab Gấu báo + lời quảng cáo |
 | Nhịp đông khách | — | chỉ lượt **quay tại quầy**: XOFA 5 / Gieo Gieo 4 bill trong 10 phút, các bill trước đều trượt → bill này chắc trúng (xét lúc mở lượt) |

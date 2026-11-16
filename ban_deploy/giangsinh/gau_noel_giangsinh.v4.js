@@ -307,8 +307,7 @@
     return {
       dangMua: dangMua(n), dangNhan: dangNhan(n), het: hetDot(n),
       chuaMo: dangNhan(n) ? l.filter(function (x) { return !x.opened && !x.huy; }) : [],
-      luot: l, qua: quaCua(d).filter(function (q) { return !q.huy; }),
-      ong: Math.max(0, Math.min(1, (Number(d && d.ong) || 0) / CFG.giaGau))   // [v4] ống may mắn 0–1 (đầy → lượt kế tiếp chắc trúng)
+      luot: l, qua: quaCua(d).filter(function (q) { return !q.huy; })
     };
   }
 
@@ -1562,8 +1561,6 @@
       '#gn-the .gt-luot b{font-size:26px;font-weight:900;color:#fff;line-height:1}#gn-the .gt-luot span{display:block;font-size:12px;color:rgba(220,236,255,.8);margin-top:2px}' +
       '#gn-the .gt-btn,#gn-q .gq-btn{border:none;border-radius:99px;padding:12px 18px;font-weight:900;font-size:13px;cursor:pointer;color:#fff;background:linear-gradient(135deg,#ef4655,#b3162a);box-shadow:0 6px 16px rgba(179,22,42,.35);-webkit-tap-highlight-color:transparent}' +
       '#gn-the .gt-qua{margin-top:12px;display:flex;flex-direction:column;gap:8px;position:relative}' +
-      '#gn-the .gt-ong{margin-top:12px;position:relative;padding:12px 14px;border-radius:18px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.18)}#gn-the .gt-ong-h{display:flex;justify-content:space-between;font-size:12.5px;font-weight:800;color:#fff}' +
-      '#gn-the .gt-ong-bar{height:8px;border-radius:99px;background:rgba(255,255,255,.18);overflow:hidden;margin:8px 0 6px}#gn-the .gt-ong-bar>i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,#f6c453,#ffde8a)}#gn-the .gt-ong small{font-size:11.5px;color:rgba(220,236,255,.8)}' +
       '#gn-the .gt-g{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:18px;background:#fff;color:#0b1d38}#gn-the .gt-g .e{font-size:30px;line-height:1}' +
       '#gn-the .gt-g .t{flex:1;min-width:0}#gn-the .gt-g .t b{display:block;font-size:18px;font-weight:900;letter-spacing:.1em;color:#b3162a}#gn-the .gt-g .t small{display:block;font-size:11.5px;color:#4b5b73;margin-top:2px;line-height:1.4}' +
       '#gn-the .gt-g.used{background:rgba(255,255,255,.1);color:rgba(220,236,255,.7)}#gn-the .gt-g.used .t b{color:rgba(220,236,255,.6);text-decoration:line-through}#gn-the .gt-g.used .t small{color:rgba(220,236,255,.6)}' +
@@ -1594,13 +1591,12 @@
       var cho = thay.filter(function (x) { return !x.used; }), da = thay.filter(function (x) { return x.used; }), n = st.chuaMo.length;
       var h = '<div class="gt-h"><div class="gt-ic">🧸</div><div class="gt-tt"><b>Gấu Noel của bạn</b><small>Mua từ 2 ly, đọc SĐT khi order → nhận lượt quay</small></div><span class="gt-tag">NOEL</span></div>';
       if (n) h += '<div class="gt-luot"><div style="flex:1"><b>' + n + ' lượt</b><span>chưa quay</span></div><button class="gt-btn" data-q="1">Quay ngay</button></div>';
-      if (st.ong > 0) h += '<div class="gt-ong"><div class="gt-ong-h"><span>Tích luỹ may mắn</span><b>' + Math.round(st.ong * 100) + '%</b></div><div class="gt-ong-bar"><i style="width:' + Math.round(st.ong * 100) + '%"></i></div><small>Mỗi lần quay chưa trúng đều được cộng thêm. Đầy 100% thì lượt kế tiếp chắc chắn trúng gấu.</small></div>';
       if (cho.length || da.length) h += '<div class="gt-qua">' + cho.map(function (x) {
         return '<div class="gt-g"><div class="e">🧸</div><div class="t"><b>' + esc(x.code) + '</b><small>1 gấu bông · nhận tại <b style="display:inline;font-size:11.5px;letter-spacing:0;color:#0b1d38">' + esc(G.tenQuan(x.store)) + '</b><br>Đưa mã cho nhân viên · hạn ' + HAN + '</small></div></div>';
       }).join('') + da.map(function (x) {
         return '<div class="gt-g used"><div class="e">🧸</div><div class="t"><b>' + esc(x.code) + '</b><small>Đã nhận ' + ngay(x.usedAt) + ' tại ' + esc(G.tenQuan(x.store)) + '</small></div></div>';
       }).join('') + '</div>';
-      if (!n && !cho.length && !da.length) h += '<div class="gt-foot" style="font-size:12.5px;color:rgba(235,244,255,.9)">Mua từ 2 ly ở The cafe 33, XOFA hoặc Gieo Gieo, đọc số điện thoại khi order — mỗi 2 ly là 1 lượt quay gấu bông. Đơn từ 6 ly chắc chắn có gấu!</div>';
+      if (!n && !cho.length && !da.length) h += '<div class="gt-foot" style="font-size:12.5px;color:rgba(235,244,255,.9)">Mua từ 2 ly ở The cafe 33, XOFA hoặc Gieo Gieo, đọc số điện thoại khi order — mỗi 2 ly là 1 lượt quay gấu bông.</div>';
       h += '<div class="gt-foot">Trúng ở quán nào nhận ở quán đó · khách chọn gấu tại quầy · nhận tới hết ' + HAN + '</div>';
       the.innerHTML = h; the.style.display = 'block';
       var b = the.querySelector('[data-q]'); if (b) b.onclick = function () { moPopup(); };

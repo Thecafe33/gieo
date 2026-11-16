@@ -373,7 +373,8 @@ const CHUNG = (fake) => {
       const the = $('gn-the');
       chk(the.style.display === 'block' && /2 lượt/.test(the.textContent) && !/GAUAB2CD/.test(the.textContent) && /GAUZZ9YY/.test(the.textContent) && /Đã nhận/.test(the.textContent), 'I3. thẻ dưới thẻ thành viên: 2 lượt chưa quay; gấu của lượt chưa quay CHƯA lộ mã; gấu đã nhận hiện «Đã nhận»', the.textContent);
       chk(the.previousElementSibling && the.previousElementSibling.classList.contains('card-gradient'), 'I4. thẻ nằm ngay dưới thẻ thành viên');
-      chk(/Tích luỹ may mắn/.test(the.textContent) && /47%/.test(the.textContent), 'I4b. [v4] thẻ có thanh «Tích luỹ may mắn» (ống 8K / 17K = 47%)', the.textContent);
+      chk(!/may mắn|tích luỹ|47%/i.test(the.textContent) && !the.querySelector('.gt-ong'), 'I4b. [v4] app khách KHÔNG lộ ống may mắn (cơ chế nội bộ) dù hồ sơ có ống 8K', the.textContent);
+      chk(!/chắc chắn có gấu|6 ly/.test(document.getElementById('gn-the').innerHTML + (window.GauNoel ? '' : '')) , 'I4c. [v4] app khách không công bố «6 ly chắc có gấu»');
       await window.__shot('gau_khach_popup');
       $('gn-q').querySelector('[data-a=quay]').click(); await sleep(600);
       const xoay = () => { const m = /rotate\(([-\d.]+)deg\)/.exec($('gn-q').querySelector('.gn-vong svg').style.transform); return m ? +m[1] : 0; };
