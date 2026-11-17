@@ -279,7 +279,20 @@ body.night::after{content:"";position:fixed;left:0;right:0;bottom:0;height:46vh;
 .gm-time i{display:block;height:100%;width:100%;background:var(--rose);transform-origin:left;transition:transform .2s linear}
 .gm-v{position:relative;width:100%;height:max(200px,calc(min(680px,100vw - 40px) * 9 / 16));border-radius:14px;overflow:hidden;background:#000;border:1px solid var(--line)}
 .gm-v iframe,.gm-v #game-player{position:absolute;inset:0;width:100%;height:100%;border:0}
-.gm-v .gm-note{position:absolute;inset:0;display:grid;place-items:center;padding:22px;text-align:center;font-size:12.5px;line-height:1.6;color:var(--tx2);background:var(--bg2)}
+.gm-v .gm-note{position:absolute;inset:0;z-index:3;display:grid;place-items:center;padding:22px;text-align:center;font-size:12.5px;line-height:1.6;color:var(--tx2);background:var(--bg2)}
+.gm-cover{position:absolute;inset:0;z-index:2;display:grid;place-items:center;align-content:center;gap:16px;cursor:default;text-align:center;
+  background:radial-gradient(70% 60% at 50% 110%,rgba(232,53,122,.55),transparent 70%),radial-gradient(60% 50% at 50% -10%,rgba(255,255,255,.06),transparent 70%),#0b0a0b;background-size:cover;background-position:center}
+.gm-cover .eq{display:flex;align-items:flex-end;gap:5px;height:46px}
+.gm-cover .eq i{width:6px;border-radius:3px;background:linear-gradient(#ffd3e2,var(--rose));animation:eq 1s ease-in-out infinite alternate}
+.gm-cover .eq i:nth-child(2){animation-delay:-.6s}.gm-cover .eq i:nth-child(3){animation-delay:-.3s}.gm-cover .eq i:nth-child(4){animation-delay:-.8s}.gm-cover .eq i:nth-child(5){animation-delay:-.45s}
+@keyframes eq{from{height:8px}to{height:46px}}
+.gm-cover.cho .eq i{animation-play-state:paused;height:8px}
+.gm-cover span{font-size:10.5px;letter-spacing:.28em;text-transform:uppercase;color:var(--tx2)}
+.gm-cover button{padding:12px 22px;border-radius:999px;background:#fff;color:#111;font-weight:600;font-size:13px}
+.gm-cover.lo{background-size:cover}
+.gm-cover.lo::before{content:"";position:absolute;inset:0;background:linear-gradient(transparent 30%,rgba(10,10,11,.85))}
+.gm-cover.lo .eq{display:none}
+.gm-cover.lo span{position:relative;align-self:end;margin-top:auto;color:#fff;font-family:var(--disp);font-size:24px;letter-spacing:-.01em;text-transform:none;padding:0 18px 18px}
 .gm-opts{display:grid;grid-template-columns:1fr;gap:10px;margin-top:18px}
 @media(min-width:620px){.gm-opts{grid-template-columns:1fr 1fr}}
 .gm-opts button{min-height:58px;padding:12px 18px;border-radius:14px;border:1px solid var(--line2);background:var(--raise);text-align:left;font-family:var(--disp);font-weight:300;font-size:19px;line-height:1.2;color:var(--tx);
@@ -631,7 +644,7 @@ mark{background:none;color:var(--rose);font-style:italic}
       <div class="gm-play" id="gm-play" hidden>
         <div class="gm-hd"><span class="cap">Câu <b id="gm-n">1</b> / 10 · chuỗi <b id="gm-streak">0</b></span><span class="gm-sc"><small>Điểm</small><span id="gm-score">0</span></span></div>
         <div class="gm-time"><i id="gm-bar"></i></div>
-        <div class="gm-v"><div id="game-player"></div><div class="gm-note" id="gm-note" hidden></div></div>
+        <div class="gm-v"><div id="game-player"></div><div class="gm-cover cho" id="gm-cover"><div class="eq"><i></i><i></i><i></i><i></i><i></i></div><span id="gm-cov-t">Đang tải nhạc…</span></div><div class="gm-note" id="gm-note" hidden></div></div>
         <div class="gm-opts" id="gm-opts"></div>
         <div class="gm-kq" id="gm-kq" hidden></div>
       </div>
@@ -1746,7 +1759,16 @@ function gmIntro(){
   if (!$('#gm-play').hidden || !$('#gm-end').hidden) return;
   $('#gm-start').hidden = false;
 }
-function gmPause(){ cancelAnimationFrame(GM.raf); if (GM.ready) try { GM.player.pauseVideo(); } catch (e) {} }
+/* Lớp phủ che video: cho = đang tải, phat = đang phát, cham = trình duyệt chặn tự phát, lo = hiện đáp án */
+function gmCover(kieu, chu){
+  const c = $('#gm-cover'); c.className = 'gm-cover' + (kieu === 'phat' ? '' : ' ' + kieu); c.style.backgroundImage = '';
+  if (kieu === 'cham') { c.innerHTML = '<div class="eq"><i></i><i></i><i></i><i></i><i></i></div><button id="gm-cham">Chạm để phát</button>'; $('#gm-cham').onclick = () => { try { GM.player.playVideo(); } catch (e) {} gmCover('cho', 'Đang tải nhạc…'); }; return; }
+  if (!c.querySelector('.eq')) c.innerHTML = '<div class="eq"><i></i><i></i><i></i><i></i><i></i></div><span id="gm-cov-t"></span>';
+  $('#gm-cov-t').textContent = chu || '';
+  if (kieu === 'lo') { const u = songArt(GM.song); c.style.backgroundImage = artCss(u, GM.song.id); }
+}
+function gmStopAuto(){ clearTimeout(GM.auto); clearInterval(GM.dem); }
+function gmPause(){ gmStopAuto(); cancelAnimationFrame(GM.raf); if (GM.ready) try { GM.player.pauseVideo(); } catch (e) {} }
 function gmShuffle(a){ for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
 $('#gm-go').onclick = gmStart;
 function gmStart(){
@@ -1763,6 +1785,7 @@ function gmNext(){
   Object.assign(GM, { song, opts: gmShuffle([song, ...sai]), done: false, t0: 0 }); GM.n++;
   $('#gm-n').textContent = GM.n; $('#gm-score').textContent = GM.score; $('#gm-streak').textContent = GM.streak;
   $('#gm-bar').style.transform = 'scaleX(1)'; $('#gm-kq').hidden = true;
+  gmCover('cho', 'Đang tải nhạc…'); clearTimeout(GM.chan); GM.chan = setTimeout(() => { if (!GM.t0 && !GM.done) gmCover('cham'); }, 3000);
   $('#gm-opts').innerHTML = GM.opts.map((x, i) => `<button data-i="${i}"><i>${'ABCD'[i]}</i>${esc(x.title)}</button>`).join('');
   gmPlay(ytOf(song));
 }
@@ -1778,7 +1801,7 @@ async function gmPlay(vid){
     playerVars: { playsinline: 1, rel: 0, modestbranding: 1, controls: 0, disablekb: 1, fs: 0, iv_load_policy: 3 },
     events: {
       onReady: () => { GM.ready = true; if (GM.pend) GM.player.loadVideoById({ videoId: GM.pend, startSeconds: GM_BAT_DAU }); },
-      onStateChange: e => { if (e.data === window.YT.PlayerState.PLAYING && !GM.t0 && !GM.done) gmTimer(); },
+      onStateChange: e => { if (e.data === window.YT.PlayerState.PLAYING && !GM.done) { gmCover('phat', 'Đang phát…'); if (!GM.t0) gmTimer(); } },
       onError: () => { toast('Video này không phát được — chuyển câu khác'); if (!GM.done) { GM.n--; gmNext(); } }
     }
   });
@@ -1794,7 +1817,7 @@ function gmTimer(){
   };
   GM.raf = requestAnimationFrame(tick);
 }
-$('#gm-kq').addEventListener('click', e => { if (e.target.closest('[data-song]')) gmPause(); });   // mở lời thì dừng nhạc game
+$('#gm-kq').addEventListener('click', e => { if (e.target.closest('[data-song]')) gmPause(); });   // mở lời: dừng nhạc và dừng tự chuyển   // mở lời thì dừng nhạc game
 $('#gm-opts').addEventListener('click', e => { const b = e.target.closest('button[data-i]'); if (b && !GM.done) gmAnswer(+b.dataset.i); });
 function gmAnswer(i){
   GM.done = true; cancelAnimationFrame(GM.raf);
@@ -1809,8 +1832,12 @@ function gmAnswer(i){
   $('#gm-kq').innerHTML = `<span class="thumb${cvCls(u, x.id)}" style="background-image:${esc(artCss(u, x.id))}">${cvx({ l: false, i: x.title.charAt(0).toUpperCase() })}</span>
     <span class="mid"><b>${ok ? 'Đúng rồi! +' + them : i < 0 ? 'Hết giờ' : 'Chưa đúng'}</b><small>${esc(x.title)}${albumOf(x) ? ' · ' + esc(albumOf(x)) : ''}</small></span>
     <span class="acts"><button class="pillbtn" data-song="${esc(x.id)}">Mở lời</button><button class="pillbtn dark" id="gm-tiep">${cuoi ? 'Xem kết quả' : 'Câu tiếp →'}</button></span>`;
-  $('#gm-kq').hidden = false;
-  $('#gm-tiep').onclick = () => cuoi ? gmEnd() : gmNext();
+  $('#gm-kq').hidden = false; clearTimeout(GM.chan);
+  gmCover('lo', x.title);
+  const di = () => { gmStopAuto(); cuoi ? gmEnd() : gmNext(); };
+  $('#gm-tiep').onclick = di;
+  let con3 = 3; const nhan = () => { const b = $('#gm-tiep'); if (b) b.textContent = (cuoi ? 'Xem kết quả' : 'Câu tiếp') + ' (' + con3 + ')'; };
+  gmStopAuto(); nhan(); GM.dem = setInterval(() => { con3--; if (con3 > 0) nhan(); }, 1000); GM.auto = setTimeout(di, 3000);
 }
 function gmEnd(){
   gmPause();
