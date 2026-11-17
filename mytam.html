@@ -787,9 +787,11 @@ function addAlbum(title, year, kind, art){
   if (art && !a.art) a.art = art;
   return a;
 }
+/* Cùng một bài nhưng nguồn ngoài (Apple Music) viết khác chính tả → gộp về một mã bài. */
+const ALIAS = { 'goi-tinh-yeu-cua-em': 'gui-tinh-yeu-cua-em' };
 function addSong(o){
   const bt = baseTitle(o.title); if (!bt) return null;
-  const id = slug(bt);
+  const id = ALIAS[slug(bt)] || slug(bt);
   let s = S.songs.get(id);
   if (!s) { s = { id, title: bt, composer: '', albumId: '', year: 0, art: '', ord: S.songs.size }; S.songs.set(id, s); }
   if (o.composer && !s.composer) s.composer = o.composer;
@@ -1308,7 +1310,7 @@ function showLines(focus){
   const src = S.lyr[cur.id].src;
   const al = albumOf(cur), ab = S.albums.get(cur.albumId);
   $('#lh-src').innerHTML = `<b>${esc(cur.title)}</b> · ${esc(ARTIST)}<br>${composerOf(cur) ? 'Sáng tác: ' + esc(composerOf(cur)) : 'Tác giả: đang cập nhật'}${al ? ' · ' + esc(al) : ''}${ab && ab.year && ab.kind !== 'tong' ? ' · ' + ab.year : ''}<br>` +
-    (src === 'lrclib' ? 'Lời: <a href="https://lrclib.net" target="_blank" rel="noopener">LRCLIB</a>' : 'Lời tự nhập trên máy này');
+    (src === 'goc' ? 'Lời do trang cung cấp' : src === 'lrclib' ? 'Lời: <a href="https://lrclib.net" target="_blank" rel="noopener">LRCLIB</a>' : 'Lời tự nhập trên máy này');
   $('#ctl').hidden = false;
   $('#ctl-mode').textContent = parsed.synced ? 'Chạy theo nhịp bài' : 'Tự cuộn lời';
   auto.t = 0; setActive(-1);
@@ -1621,17 +1623,39 @@ $('#yt-del').onclick = () => {
   save('mt_meta', S.meta); closeSheet('ytadd'); ytHide();
 };
 
+/* ════════════ Lời gắn cố định (từ form lời) ════════════
+   LYR_GOC: mã bài → lời (thường hoặc LRC). LYR_TEN: mã bài → tên, cho bài có thể chưa có trong danh sách.
+   Bài trong LYR_TEN chỉ được thêm khi đã nạp xong danh sách Apple Music mà vẫn chưa có — không nhân bản bài. */
+const LYR_GOC = {};
+const LYR_TEN = {};
+function napLoiGoc(){
+  for (const [id, t] of Object.entries(LYR_GOC)) {
+    const cu = S.lyr[id];
+    if (cu && cu.src === 'tay') continue;                        // lời tự dán trên máy được ưu tiên
+    S.lyr[id] = /\[\d+:\d+/.test(t) ? { s: t, p: '', src: 'goc' } : { p: t, s: '', src: 'goc' };
+  }
+}
+function themBaiThieu(){
+  let them = 0; const tong = addAlbum('Single & ca khúc lẻ', 0, 'tong');
+  for (const [id, ten] of Object.entries(LYR_TEN)) {
+    const ma = ALIAS[id] || id;
+    if (S.songs.has(ma)) continue;
+    const x = addSong({ title: ten, albumId: tong.id }); if (x) them++;
+  }
+  if (them) renderAll();
+}
+
 /* ════════════ Khởi động ════════════ */
 seed();
 const itc = load('mt_it', null); if (itc) applyItunes(itc);
-applyTheme(); applySpeed(); applyPoster();
+napLoiGoc(); applyTheme(); applySpeed(); applyPoster();
 $('#ctl-play').innerHTML = ICON_PLAY;
 renderAll();
 $('#seek-goi').textContent = 'Ví dụ: “' + [...S.songs.values()][hash(new Date().toDateString()) % S.songs.size].title + '” hoặc một câu bạn nhớ';
 const hm = /^#bai=([a-z0-9-]+)$/.exec(location.hash);
 if (location.hash) history.replaceState(null, '', location.pathname + location.search);
 if (hm && S.songs.has(hm[1])) openLyr(hm[1]);
-syncItunes();
+syncItunes().finally(themBaiThieu);
 /* Khối hiện dần khi cuộn tới; poster trượt chậm hơn trang (chiều sâu). */
 const io = 'IntersectionObserver' in window ? new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } }), { rootMargin: '0px 0px -6% 0px' }) : null;
 $$('.rv').forEach(el => io ? io.observe(el) : el.classList.add('in'));
