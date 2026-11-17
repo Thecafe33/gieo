@@ -987,7 +987,15 @@ const songArt = s => S.art[s.id] || s.art || (S.albums.get(s.albumId) || {}).art
 const albumArt = a => a.art || (a.songs.map(id => S.songs.get(id)).map(s => s && (S.art[s.id] || s.art)).find(Boolean)) || '';
 const composerOf = s => ((S.meta[s.id] || {}).composer ?? s.composer) || '';
 const albumOf = s => { const m = (S.meta[s.id] || {}).album; if (m) return m; const a = S.albums.get(s.albumId); return a && a.kind !== 'tong' ? a.title : ''; };
-const hasLyr = id => { const l = S.lyr[id]; return !!(l && (l.p || l.s)); };
+const coLoi = l => !!(l && (l.p || l.s));
+const gocCache = {};
+/* Lời dùng để hiện: S.lyr (LRCLIB hoặc tự dán) nếu có, không thì lời gắn sẵn LYR_GOC */
+function lyrOf(id){
+  const l = S.lyr[id]; if (coLoi(l)) return l;
+  const g = LYR_GOC[id]; if (!g) return l;
+  return gocCache[id] || (gocCache[id] = /\[\d+:\d+/.test(g) ? { s: g, p: '', src: 'goc' } : { p: g, s: '', src: 'goc' });
+}
+const hasLyr = id => coLoi(lyrOf(id));
 function byLine(s){
   const c = composerOf(s);
   return c ? c : ARTIST;
@@ -1102,7 +1110,7 @@ function parseLyr(l){
   const txt = l.p || (l.s || '').replace(/\[[^\]]*\]/g, '');
   return { synced: false, lines: txt.split(/\r?\n/).map(x => ({ t: 0, x: x.trim() })) };
 }
-const linesOf = id => parseLyr(S.lyr[id]).lines.map(l => l.x).filter(Boolean);
+const linesOf = id => parseLyr(lyrOf(id)).lines.map(l => l.x).filter(Boolean);
 
 /* ════════════ Điều hướng ════════════ */
 let view = 'home';
@@ -1468,11 +1476,11 @@ async function openLyr(id, line){
   openSheet('lyr');
   if (location.hash !== '#bai=' + s.id) history.replaceState(history.state, '', location.pathname + location.search + '#bai=' + s.id);
   wantArt(s);
-  const l = S.lyr[s.id];
-  if (hasLyr(s.id)) { showLines(line); return; }
-  if (l && l.none && Date.now() - l.at < 3 * 864e5) { showEmpty('none'); return; }
+  const l = S.lyr[s.id], goc = hasLyr(s.id);   // goc = có lời gắn sẵn để dự phòng
+  if (coLoi(l)) { showLines(line); return; }
+  if (l && l.none && Date.now() - l.at < 3 * 864e5) { goc ? showLines(line) : showEmpty('none'); return; }
   $('#lyr-body').innerHTML = '<div class="skel"><i style="width:72%"></i><i style="width:58%"></i><i style="width:80%"></i><i style="width:46%"></i><i style="width:66%"></i></div>'; $('#lh-src').textContent = '';
-  try { await fetchLyrics(s); } catch (e) { if (cur === s) showEmpty('err', e.message); return; }
+  try { await fetchLyrics(s); } catch (e) { if (cur === s) { if (goc) showLines(line); else showEmpty('err', e.message); } return; }
   if (cur !== s) return;
   if (hasLyr(s.id)) showLines(line); else showEmpty('none');
 }
@@ -1486,12 +1494,12 @@ function showEmpty(kind, msg){
   $('#ctl').hidden = true;
 }
 function showLines(focus){
-  parsed = parseLyr(S.lyr[cur.id]);
+  parsed = parseLyr(lyrOf(cur.id));
   const L = parsed.lines;
   const box = document.createElement('div'); box.className = 'lines' + (parsed.synced ? ' synced' : '');
   box.innerHTML = L.map((l, i) => l.x ? `<p data-i="${i}">${esc(l.x)}</p>` : '<p class="gap"></p>').join('');
   $('#lyr-body').innerHTML = ''; $('#lyr-body').appendChild(box); applyFs();
-  const src = S.lyr[cur.id].src;
+  const src = lyrOf(cur.id).src;
   const al = albumOf(cur), ab = S.albums.get(cur.albumId);
   $('#lh-src').innerHTML = `<b>${esc(cur.title)}</b> · ${esc(ARTIST)}<br>${composerOf(cur) ? 'Sáng tác: ' + esc(composerOf(cur)) : 'Tác giả: đang cập nhật'}${al ? ' · ' + esc(al) : ''}${ab && ab.year && ab.kind !== 'tong' ? ' · ' + ab.year : ''}<br>` +
     (src === 'goc' ? 'Lời do trang cung cấp' : src === 'lrclib' ? 'Lời: <a href="https://lrclib.net" target="_blank" rel="noopener">LRCLIB</a>' : 'Lời tự nhập trên máy này') + '<br>© Lời và nhạc thuộc tác giả, Mỹ Tâm và chủ sở hữu tương ứng · trang người hâm mộ, phi lợi nhuận';
@@ -1585,7 +1593,7 @@ $('#lh-fav').onclick = () => { if (S.fav.has(cur.id)) S.fav.delete(cur.id); else
 
 /* ════════════ Sửa lời / thông tin ════════════ */
 function openEdit(){
-  const l = S.lyr[cur.id] || {};
+  const l = lyrOf(cur.id) || {};
   $('#s-tg').value = composerOf(cur); $('#s-al').value = albumOf(cur);
   $('#s-ly').value = l.s || l.p || '';
   stopAuto(); openSheet('sua');
@@ -1599,7 +1607,7 @@ $('#s-luu').onclick = () => {
   if (al !== alDef) m.album = al; else delete m.album;
   if (Object.keys(m).length) S.meta[cur.id] = m; else delete S.meta[cur.id];
   save('mt_meta', S.meta);
-  const old = S.lyr[cur.id] || {};
+  const old = lyrOf(cur.id) || {};
   if (ly && ly !== (old.s || old.p || '')) { S.lyr[cur.id] = /\[\d+:\d+/.test(ly) ? { s: ly, p: '', src: 'tay', at: Date.now() } : { p: ly, s: '', src: 'tay', at: Date.now() }; saveLyr(); }
   if (!ly && (old.p || old.s)) { delete S.lyr[cur.id]; saveLyr(); }
   closeSheet('sua'); toast('Đã lưu trên máy này');
@@ -1645,7 +1653,7 @@ function renderSearch(){
     const hits = [];
     for (const s of S.songs.values()) {
       if (!hasLyr(s.id)) continue;
-      const L = parseLyr(S.lyr[s.id]).lines, seen = new Set();
+      const L = parseLyr(lyrOf(s.id)).lines, seen = new Set();
       for (let i = 0; i < L.length && hits.length < 60; i++) {
         const x = L[i].x; if (!x || seen.has(x)) continue;
         if (fold(x).includes(fq)) { seen.add(x); hits.push({ s, i, x }); }
@@ -1670,7 +1678,7 @@ function updIdx(done, total){
 }
 $('#idx-btn').onclick = async () => {
   if (idxRun) { idxRun = false; return; }
-  const todo = [...S.songs.values()].filter(s => !hasLyr(s.id) && !(S.lyr[s.id] && S.lyr[s.id].none && Date.now() - S.lyr[s.id].at < 3 * 864e5));
+  const todo = [...S.songs.values()].filter(s => !coLoi(S.lyr[s.id]) && !(S.lyr[s.id] && S.lyr[s.id].none && Date.now() - S.lyr[s.id].at < 3 * 864e5));
   if (!todo.length) { toast('Đã tải lời đủ các bài LRCLIB có'); return; }
   idxRun = true; let k = 0, fail = 0;
   for (const s of todo) {
@@ -1862,12 +1870,9 @@ const LYR_TEN = {
  "khi-tinh-yeu-tro-lai": "Khi tình yêu trở lại"
 };
 function napLoiGoc(){
-  for (const id of Object.keys(S.lyr)) if (S.lyr[id].src === 'goc' && !(id in LYR_GOC)) delete S.lyr[id];   // lời gắn cũ đã gỡ (gắn nhầm) → bỏ, để tải lại
-  for (const [id, t] of Object.entries(LYR_GOC)) {
-    const cu = S.lyr[id];
-    if (cu && cu.src === 'tay') continue;                        // lời tự dán trên máy được ưu tiên
-    S.lyr[id] = /\[\d+:\d+/.test(t) ? { s: t, p: '', src: 'goc' } : { p: t, s: '', src: 'goc' };
-  }
+  let doi = false;   // bản cũ chép lời gắn sẵn vào bộ nhớ → bỏ, để LRCLIB được ưu tiên (lời gắn sẵn vẫn dự phòng qua lyrOf)
+  for (const id of Object.keys(S.lyr)) if (S.lyr[id] && S.lyr[id].src === 'goc') { delete S.lyr[id]; doi = true; }
+  if (doi) saveLyr();
 }
 function themBaiThieu(){
   let them = 0; const tong = addAlbum('Single & ca khúc lẻ', 0, 'tong');
