@@ -367,6 +367,23 @@ mark{background:none;color:var(--rose);font-style:italic}
 .skel i{display:block;height:calc(var(--fs,24px) * .8);border-radius:6px;background:linear-gradient(90deg,var(--card) 0%,rgba(255,255,255,.13) 50%,var(--card) 100%);background-size:200% 100%;animation:mo 1.6s ease-in-out infinite}
 @keyframes mo{from{background-position:100% 0}to{background-position:-100% 0}}
 
+/* Đệm nhạc YouTube: khung video nhỏ (YouTube yêu cầu video phải hiện, tối thiểu 200 px) */
+.ytchip{display:inline-flex;align-items:center;gap:9px;margin:0 0 26px;height:34px;padding:0 15px 0 11px;border-radius:999px;border:1px solid var(--cardb);
+  font-size:12px;font-weight:500;color:var(--fg2);transition:color .3s,border-color .3s}
+.ytchip:hover{color:var(--fg);border-color:var(--fg2)}
+.ytchip svg{color:var(--rose)}
+.ytp{position:absolute;left:50%;bottom:calc(88px + env(safe-area-inset-bottom));transform:translateX(-50%);z-index:4;width:min(400px,calc(100% - 32px));
+  border-radius:16px;overflow:hidden;background:#000;border:1px solid var(--cardb);box-shadow:0 24px 44px -16px rgba(0,0,0,.75);animation:vao .4s var(--ease)}
+.ytp-hd{display:flex;align-items:center;gap:6px;height:38px;padding:0 4px 0 12px;background:var(--glass);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);color:var(--fg)}
+.ytp-hd .cap{flex:1;font-size:9px;color:var(--fg2)}
+.ytp-hd button{height:28px;min-width:28px;padding:0 7px;border-radius:999px;font-size:11px;font-weight:500;color:var(--fg2);display:grid;place-items:center}
+.ytp-hd button:hover{background:var(--card);color:var(--fg)}
+.ytp-hd b{font-size:11px;font-weight:600;min-width:34px;text-align:center;font-feature-settings:"tnum";color:var(--fg)}
+.ytp-v{position:relative;width:100%;height:max(200px,calc(min(400px,100vw - 32px) * 9 / 16))}
+.ytp-v iframe,.ytp-v #yt-player{position:absolute;inset:0;width:100%;height:100%;border:0}
+.ytp-note{position:absolute;inset:0;display:grid;place-items:center;padding:22px;text-align:center;font-size:12.5px;line-height:1.6;color:rgba(255,255,255,.7);background:#0d0d0e}
+#lyr.has-yt .lyr-scroll{-webkit-mask:linear-gradient(transparent 0,#000 30px,#000 calc(100% - 330px),transparent calc(100% - 250px));mask:linear-gradient(transparent 0,#000 30px,#000 calc(100% - 330px),transparent calc(100% - 250px))}
+@media(min-width:1000px){.ytp{left:auto;right:24px;bottom:24px;transform:none;width:380px}#lyr.has-yt .lyr-scroll{-webkit-mask:linear-gradient(transparent 0,#000 30px,#000 calc(100% - 120px),transparent calc(100% - 24px));mask:linear-gradient(transparent 0,#000 30px,#000 calc(100% - 120px),transparent calc(100% - 24px))}}
 /* Thanh dưới trang lời */
 .ctl{position:absolute;left:50%;bottom:calc(16px + env(safe-area-inset-bottom));transform:translateX(-50%);z-index:4;width:min(400px,calc(100% - 32px));height:60px;
   display:flex;align-items:center;gap:10px;padding:0 8px;border-radius:999px;background:var(--glass);border:1px solid var(--cardb);
@@ -432,9 +449,9 @@ mark{background:none;color:var(--rose);font-style:italic}
 #alb.flip .as-head .mid,#alb.flip .sec,#alb.flip .list,#alb.flip [data-dong]{animation:vao .7s var(--ease) both .16s}
 
 /* ═══════════ Sửa lời ═══════════ */
-#sua{background:rgba(8,3,6,.6);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);align-items:center;justify-content:flex-end}
+#sua,#ytadd{background:rgba(8,3,6,.6);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);align-items:center;justify-content:flex-end}
 .sua-in{width:min(640px,100%);background:var(--bg2);border:1px solid var(--line2);border-bottom:0;border-radius:24px 24px 0 0;padding:16px 22px calc(20px + env(safe-area-inset-bottom));max-height:92vh;overflow:auto}
-@media(min-width:700px){#sua{justify-content:center}.sua-in{border-radius:24px;border-bottom:1px solid var(--line2)}}
+@media(min-width:700px){#sua,#ytadd{justify-content:center}.sua-in{border-radius:24px;border-bottom:1px solid var(--line2)}}
 .sua-in .grip{width:36px;height:3px;border-radius:9px;background:var(--line2);margin:0 auto 20px}
 .sua-in h3{margin:0 0 8px;font-family:var(--disp);font-weight:300;font-size:30px}
 .sua-in .sub{margin:0 0 22px;color:var(--tx3);font-size:12.5px;line-height:1.7}
@@ -619,7 +636,14 @@ mark{background:none;color:var(--rose);font-style:italic}
     <span class="vh" id="lyr-ttl"></span>
   </div>
   <div class="lyr-scroll" id="lyr-scroll">
-    <div class="lyr-in"><div id="lyr-body"></div><div class="lyr-foot" id="lh-src"></div></div>
+    <div class="lyr-in"><button class="ytchip" id="yt-chip"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M21.6 7.2a2.6 2.6 0 0 0-1.8-1.8C18.2 5 12 5 12 5s-6.2 0-7.8.4A2.6 2.6 0 0 0 2.4 7.2 27 27 0 0 0 2 12a27 27 0 0 0 .4 4.8 2.6 2.6 0 0 0 1.8 1.8C5.8 19 12 19 12 19s6.2 0 7.8-.4a2.6 2.6 0 0 0 1.8-1.8A27 27 0 0 0 22 12a27 27 0 0 0-.4-4.8zM10 15V9l5.2 3z"/></svg><span>Nghe kèm YouTube</span></button><div id="lyr-body"></div><div class="lyr-foot" id="lh-src"></div></div>
+  </div>
+  <div class="ytp" id="ytp" hidden>
+    <div class="ytp-hd"><span class="cap">YouTube · lệch lời</span>
+      <button data-yo="-0.5" aria-label="Lời sớm hơn 0,5 giây">−0.5s</button><b id="yo-v">0.0s</b><button data-yo="0.5" aria-label="Lời muộn hơn 0,5 giây">+0.5s</button>
+      <button id="yt-doi" aria-label="Đổi video"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg></button>
+      <button id="yt-x" aria-label="Tắt video"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+    <div class="ytp-v"><div id="yt-player"></div><div class="ytp-note" id="yt-note" hidden>YouTube chỉ phát khi trang đã nằm trên web (địa chỉ https://…). Mở file trực tiếp trên máy thì video không chạy được.</div></div>
   </div>
   <div class="ctl" id="ctl">
     <button class="play" id="ctl-play" aria-label="Tự chạy"></button>
@@ -647,6 +671,22 @@ mark{background:none;color:var(--rose);font-style:italic}
       <button class="pillbtn" data-dong="sua">Huỷ</button>
       <button class="pillbtn" id="s-tai">Tải lại từ LRCLIB</button>
       <button class="pillbtn dark" id="s-luu">Lưu</button>
+    </div>
+  </div>
+</section>
+
+<!-- ═════════ DÁN LINK YOUTUBE ═════════ -->
+<section class="sheet" id="ytadd" hidden>
+  <div class="sua-in">
+    <div class="grip"></div>
+    <h3>Nghe kèm YouTube</h3>
+    <p class="sub">Mở YouTube, chọn video của bài này → <b>Chia sẻ</b> → <b>Sao chép đường liên kết</b>, rồi dán vào đây. Lưu trên máy này — lần sau mở lời là có nhạc, lời chạy theo video.</p>
+    <div class="f"><label for="yt-in">Link YouTube</label><input id="yt-in" inputmode="url" autocomplete="off" placeholder="https://youtu.be/…"></div>
+    <div class="acts">
+      <button class="pillbtn" id="yt-find">Tìm trên YouTube ↗</button>
+      <button class="pillbtn" id="yt-paste">Dán</button>
+      <button class="pillbtn" id="yt-del" hidden>Bỏ video</button>
+      <button class="pillbtn dark" id="yt-save">Lưu</button>
     </div>
   </div>
 </section>
@@ -1223,6 +1263,7 @@ function applySpeed(){
   r.value = v; r.style.setProperty('--p', ((v - 0.5) / 1.5 * 100) + '%');
   $('#ctl-v').textContent = (+v.toFixed(2)) + '×';
   $$('#ctl-t button').forEach(b => b.classList.toggle('on', Math.abs(+b.dataset.v - v) < 0.01));
+  if (ytActive()) { try { yt.player.setPlaybackRate(Math.min(2, Math.max(0.25, Math.round(v * 4) / 4))); } catch (e) {} }   // YouTube nhận bước 0.25×
 }
 $('#ctl-r').oninput = e => { S.prefs.speed = Math.round(+e.target.value * 100) / 100; applySpeed(); savePrefs(); };
 /* Chạm số tốc độ → nhảy mốc kế tiếp. */
@@ -1233,7 +1274,7 @@ document.addEventListener('click', e => { if (!e.target.closest('#aa-pop,#ctl-aa
 
 async function openLyr(id, line){
   const s = S.songs.get(id); if (!s) return;
-  cur = s; stopAuto();
+  cur = s; stopAuto(); parsed = null; activeI = -1;
   const u = songArt(s);
   const bd = $('#lyr-bd'); bd.dataset.art = s.id; bd.className = 'bd' + cvCls(u, s.id); bd.style.backgroundImage = artCss(u, s.id);
   const art = $('#lh-art'); art.dataset.art = s.id; art.className = 'lh-art' + cvCls(u, s.id); art.style.backgroundImage = artCss(u, s.id); art.innerHTML = cvx({ l: false, i: s.title.charAt(0).toUpperCase() });
@@ -1241,6 +1282,7 @@ async function openLyr(id, line){
   const al = albumOf(s), a = S.albums.get(s.albumId);
   $('#lh-by').textContent = (composerOf(s) ? 'Sáng tác ' + composerOf(s) : ARTIST) + (al ? ' · ' + al : '') + (a && a.year && a.kind !== 'tong' ? ' · ' + a.year : '');
   updFav();
+  if (ytOf(s)) ytShow(ytOf(s)); else ytHide();
   $('#lyr-scroll').scrollTop = 0; $('#lyr-top').classList.remove('scrolled');
   openSheet('lyr');
   if (location.hash !== '#bai=' + s.id) history.replaceState(history.state, '', location.pathname + location.search + '#bai=' + s.id);
@@ -1288,38 +1330,63 @@ function setActive(i){
 $('#lyr-body').addEventListener('click', e => {
   const p = e.target.closest('.lines.synced p[data-i]'); if (!p || !parsed) return;
   const i = +p.dataset.i; auto.t = parsed.lines[i].t; setActive(i); centerOn(p, true);
+  if (ytActive()) { try { yt.player.seekTo(Math.max(0, parsed.lines[i].t - ytOff()), true); } catch (er) {} }   // chạm dòng → video tua tới đó
 });
 function centerOn(p, smooth){
   const sc = $('#lyr-scroll'), y = p.offsetTop - sc.clientHeight * 0.38;
   sc.scrollTo({ top: Math.max(0, y), behavior: smooth ? 'smooth' : 'auto' });
 }
 function toggleAuto(){ auto.on ? stopAuto() : startAuto(); }
-function startAuto(){
-  if (!parsed || !parsed.lines.length) return;
+/* loopOn / loopOff: chỉ bật tắt vòng vẽ; startAuto / stopAuto: lệnh của người dùng (có video thì điều khiển video). */
+function loopOn(){
+  if (auto.on) return;
   auto.on = true; auto.last = performance.now(); auto.acc = $('#lyr-scroll').scrollTop;
-  if (parsed.synced && activeI < 0) { auto.t = Math.max(0, parsed.lines[0].t - 1.5); }
-  $('#ctl-play').innerHTML = ICON_PAUSE; $('#ctl-play').setAttribute('aria-label', 'Dừng tự chạy');
+  $('#ctl-play').innerHTML = ICON_PAUSE; $('#ctl-play').setAttribute('aria-label', 'Dừng');
   cancelAnimationFrame(auto.raf); auto.raf = requestAnimationFrame(stepAuto);
 }
-function stopAuto(){
+function loopOff(){
   auto.on = false; cancelAnimationFrame(auto.raf);
   $('#ctl-play').innerHTML = ICON_PLAY; $('#ctl-play').setAttribute('aria-label', 'Tự chạy');
+}
+function startAuto(){
+  if (ytActive()) { try { yt.player.playVideo(); } catch (e) {} return; }   // vòng vẽ bật khi video báo đang phát
+  if (!parsed || !parsed.lines.length) return;
+  if (parsed.synced && activeI < 0) { auto.t = Math.max(0, parsed.lines[0].t - 1.5); }
+  loopOn();
+}
+function stopAuto(){
+  if (ytActive()) { try { yt.player.pauseVideo(); } catch (e) {} }
+  loopOff();
 }
 function stepAuto(now){
   if (!auto.on) return;
   const dt = Math.min(0.1, (now - auto.last) / 1000); auto.last = now;
   const sc = $('#lyr-scroll'), v = S.prefs.speed;
+  if (ytActive()) {                                   // có video: lời theo thời gian thật của video
+    let t = 0, dur = 0; try { t = yt.player.getCurrentTime() + ytOff(); dur = yt.player.getDuration() || 0; } catch (e) {}
+    if (parsed && parsed.synced) {
+      auto.t = t; let i = -1; const L = parsed.lines;
+      for (let k = 0; k < L.length; k++) { if (L[k].t <= t) i = k; else break; }
+      while (i >= 0 && !L[i].x) i--;
+      if (i !== activeI) { setActive(i); const p = $(`#lyr-body p[data-i="${i}"]`); if (p && now > auto.hold) centerOn(p, true); }
+    } else if (parsed && dur > 0 && now > auto.hold) {
+      const body = $('#lyr-body'), end = Math.max(0, body.offsetTop + body.offsetHeight - sc.clientHeight * 0.5);
+      const want = end * Math.min(1, Math.max(0, t / dur)); sc.scrollTop += (want - sc.scrollTop) * 0.08;
+    }
+    auto.raf = requestAnimationFrame(stepAuto); return;
+  }
+  if (!parsed) { loopOff(); return; }
   if (parsed.synced) {
     auto.t += dt * v;
     let i = -1; const L = parsed.lines;
     for (let k = 0; k < L.length; k++) { if (L[k].t <= auto.t) i = k; else break; }
     while (i >= 0 && !L[i].x) i--;
     if (i !== activeI) { setActive(i); const p = $(`#lyr-body p[data-i="${i}"]`); if (p && now > auto.hold) centerOn(p, true); }
-    if (auto.t > L[L.length - 1].t + 6) { stopAuto(); return; }
+    if (auto.t > L[L.length - 1].t + 6) { loopOff(); return; }
   } else if (now > auto.hold) {
     auto.acc += dt * 26 * v * (S.prefs.fs / 24);
     sc.scrollTop = auto.acc;
-    if (sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 2) { stopAuto(); return; }
+    if (sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 2) { loopOff(); return; }
   } else auto.acc = sc.scrollTop;
   auto.raf = requestAnimationFrame(stepAuto);
 }
@@ -1460,6 +1527,100 @@ $('#poster-file').onchange = e => {
 };
 /* Bụi sáng bay trong luồng đèn */
 (function(){ const d = $('#dust'); let h = ''; for (let i = 0; i < 22; i++) { const r = hash('d' + i); h += `<i style="left:${30 + r % 40}%;top:${30 + (r >> 6) % 55}%;animation-delay:${(r >> 3) % 70 / 10}s;animation-duration:${5 + (r >> 9) % 5}s"></i>`; } d.innerHTML = h; })();
+
+/* ════════════ Đệm nhạc YouTube (dán link, không cần khoá API) ════════════
+   Dùng YouTube IFrame Player API chính thức. Video luôn hiện (yêu cầu của YouTube). Link lưu ở mt_meta[id].yt,
+   độ lệch lời so với video ở mt_meta[id].yo (giây). Mã video kiểm bằng regex 11 ký tự trước khi dùng. */
+const yt = { api: null, player: null, ready: false, vid: '', playing: false };
+const YT_ID = /^[A-Za-z0-9_-]{11}$/;
+function ytId(raw){
+  const t = String(raw || '').trim(); if (YT_ID.test(t)) return t;
+  try {
+    const u = new URL(t), h = u.hostname.replace(/^(www|m|music)\./, '');
+    if (h === 'youtu.be') { const id = u.pathname.slice(1, 12); return YT_ID.test(id) ? id : ''; }
+    if (/(^|\.)youtube(-nocookie)?\.com$/.test(h)) {
+      let id = u.searchParams.get('v') || '';
+      if (!id) { const m = u.pathname.match(/\/(?:embed|shorts|live|v)\/([A-Za-z0-9_-]{11})/); id = m ? m[1] : ''; }
+      return YT_ID.test(id) ? id : '';
+    }
+  } catch (e) {}
+  return '';
+}
+const ytOf = s => { const v = (S.meta[s.id] || {}).yt || ''; return YT_ID.test(v) ? v : ''; };
+const ytOff = () => cur ? +((S.meta[cur.id] || {}).yo || 0) : 0;
+const ytActive = () => !!(yt.ready && yt.player && yt.vid && !$('#ytp').hidden);
+function loadYtApi(){
+  if (yt.api) return yt.api;
+  yt.api = new Promise((res, rej) => {
+    if (window.YT && window.YT.Player) return res();
+    const prev = window.onYouTubeIframeAPIReady;
+    window.onYouTubeIframeAPIReady = () => { if (prev) try { prev(); } catch (e) {} res(); };
+    const sc = document.createElement('script'); sc.src = 'https://www.youtube.com/iframe_api';
+    sc.onerror = () => { yt.api = null; rej(new Error('Không tải được YouTube — kiểm tra mạng')); };
+    document.head.appendChild(sc);
+  });
+  return yt.api;
+}
+function ytState(e){
+  const P = window.YT.PlayerState; yt.playing = e.data === P.PLAYING;
+  if (e.data === P.PLAYING) { applySpeed(); loopOn(); }
+  else if (e.data === P.PAUSED || e.data === P.ENDED) loopOff();
+}
+async function ytShow(vid){
+  $('#ytp').hidden = false; $('#lyr').classList.add('has-yt'); updYt();
+  if (location.protocol === 'file:') { $('#yt-note').hidden = false; return; }
+  $('#yt-note').hidden = true;
+  try { await loadYtApi(); } catch (e) { toast(e.message); return; }
+  if (yt.player) { if (yt.vid !== vid) { yt.vid = vid; if (yt.ready) yt.player.cueVideoById(vid); } return; }
+  yt.vid = vid;
+  yt.player = new window.YT.Player('yt-player', {
+    videoId: vid, width: '100%', height: '100%',
+    playerVars: { playsinline: 1, rel: 0, modestbranding: 1 },
+    events: {
+      onReady: () => { yt.ready = true; if (yt.player.getVideoData && yt.player.getVideoData().video_id !== yt.vid) yt.player.cueVideoById(yt.vid); },
+      onStateChange: ytState,
+      onError: e => toast('Video này không phát nhúng được (mã ' + e.data + ') — thử link khác')
+    }
+  });
+}
+function ytHide(){
+  if (yt.ready) { try { yt.player.pauseVideo(); } catch (e) {} }
+  $('#ytp').hidden = true; $('#lyr').classList.remove('has-yt'); loopOff(); updYt();
+}
+function updYt(){
+  if (!cur) return;
+  const has = !!ytOf(cur), shown = !$('#ytp').hidden;
+  $('#yt-chip').hidden = has && shown;
+  $('#yt-chip span').textContent = has ? 'Mở video YouTube' : 'Nghe kèm YouTube';
+  const o = ytOff(); $('#yo-v').textContent = (o > 0 ? '+' : '') + o.toFixed(1) + 's';
+}
+function openYtAdd(){
+  const v = ytOf(cur); $('#yt-in').value = v ? 'https://youtu.be/' + v : ''; $('#yt-del').hidden = !v;
+  openSheet('ytadd'); setTimeout(() => $('#yt-in').focus(), 80);
+}
+$('#yt-chip').onclick = () => { const v = ytOf(cur); if (v) ytShow(v); else openYtAdd(); };
+$('#yt-doi').onclick = openYtAdd;
+$('#yt-x').onclick = ytHide;
+$('#ytp').addEventListener('click', e => {
+  const b = e.target.closest('[data-yo]'); if (!b || !cur) return;
+  const m = S.meta[cur.id] || (S.meta[cur.id] = {});
+  m.yo = Math.round(((+m.yo || 0) + +b.dataset.yo) * 10) / 10; if (!m.yo) delete m.yo;
+  save('mt_meta', S.meta); updYt();
+});
+$('#yt-find').onclick = () => window.open('https://www.youtube.com/results?search_query=' + encodeURIComponent(ARTIST + ' ' + cur.title), '_blank', 'noopener');
+$('#yt-paste').onclick = async () => {
+  try { const t = await navigator.clipboard.readText(); $('#yt-in').value = t.trim(); }
+  catch (e) { toast('Trình duyệt chưa cho đọc bộ nhớ tạm — nhấn giữ ô nhập để dán'); }
+};
+$('#yt-save').onclick = () => {
+  const id = ytId($('#yt-in').value); if (!id) { toast('Link chưa đúng — cần link video YouTube'); return; }
+  const m = S.meta[cur.id] || (S.meta[cur.id] = {}); m.yt = id; save('mt_meta', S.meta);
+  closeSheet('ytadd'); ytShow(id); toast('Đã lưu — bấm ▶ để nghe kèm lời');
+};
+$('#yt-del').onclick = () => {
+  const m = S.meta[cur.id] || {}; delete m.yt; delete m.yo; if (!Object.keys(m).length) delete S.meta[cur.id];
+  save('mt_meta', S.meta); closeSheet('ytadd'); ytHide();
+};
 
 /* ════════════ Khởi động ════════════ */
 seed();
