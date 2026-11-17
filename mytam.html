@@ -277,8 +277,8 @@ body.night::after{content:"";position:fixed;left:0;right:0;bottom:0;height:46vh;
 .gm-sc small{font-family:var(--sans);font-size:10px;letter-spacing:.24em;color:var(--tx3);margin-right:8px;text-transform:uppercase}
 .gm-time{height:2px;background:var(--line2);border-radius:2px;overflow:hidden;margin-bottom:16px}
 .gm-time i{display:block;height:100%;width:100%;background:var(--rose);transform-origin:left;transition:transform .2s linear}
-.gm-v{position:relative;width:100%;height:max(200px,calc(min(680px,100vw - 40px) * 9 / 16));border-radius:14px;overflow:hidden;background:#000;border:1px solid var(--line)}
-.gm-v iframe,.gm-v #game-player{position:absolute;inset:0;width:100%;height:100%;border:0}
+.gm-v{position:relative;width:100%;height:220px;border-radius:14px;overflow:hidden;background:#000;border:1px solid var(--line)}
+.gm-v iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
 .gm-v .gm-note{position:absolute;inset:0;z-index:3;display:grid;place-items:center;padding:22px;text-align:center;font-size:12.5px;line-height:1.6;color:var(--tx2);background:var(--bg2)}
 .gm-cover{position:absolute;inset:0;z-index:2;display:grid;place-items:center;align-content:center;gap:16px;cursor:default;text-align:center;
   background:radial-gradient(70% 60% at 50% 110%,rgba(232,53,122,.55),transparent 70%),radial-gradient(60% 50% at 50% -10%,rgba(255,255,255,.06),transparent 70%),#0b0a0b;background-size:cover;background-position:center}
@@ -637,16 +637,17 @@ mark{background:none;color:var(--rose);font-style:italic}
     </header>
     <div class="gm">
       <div class="gm-start" id="gm-start">
-        <p>Trang phát một đoạn nhạc của Mỹ Tâm từ YouTube. Chọn đúng tên bài trong 4 đáp án — trả lời càng nhanh càng nhiều điểm, đúng liên tiếp có thưởng. Mỗi lượt 10 câu, 15 giây một câu.</p>
+        <p>Trang phát một đoạn nghe thử của Mỹ Tâm (Apple Music, chỉ có tiếng). Chọn đúng tên bài trong 4 đáp án — trả lời càng nhanh càng nhiều điểm, đúng liên tiếp có thưởng. Mỗi lượt 10 câu, 15 giây một câu.</p>
         <div class="best"><div><span>Kỷ lục</span><b id="gm-best">0</b></div><div><span>Số bài có nhạc</span><b id="gm-pool">0</b></div></div>
         <button class="btn" id="gm-go">Bắt đầu chơi<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
       </div>
       <div class="gm-play" id="gm-play" hidden>
         <div class="gm-hd"><span class="cap">Câu <b id="gm-n">1</b> / 10 · chuỗi <b id="gm-streak">0</b></span><span class="gm-sc"><small>Điểm</small><span id="gm-score">0</span></span></div>
         <div class="gm-time"><i id="gm-bar"></i></div>
-        <div class="gm-v"><div id="game-player"></div><div class="gm-cover cho" id="gm-cover"><div class="eq"><i></i><i></i><i></i><i></i><i></i></div><span id="gm-cov-t">Đang tải nhạc…</span></div><div class="gm-note" id="gm-note" hidden></div></div>
+        <audio id="gm-audio" preload="auto" hidden></audio><div class="gm-v"><div class="gm-cover cho" id="gm-cover"><div class="eq"><i></i><i></i><i></i><i></i><i></i></div><span id="gm-cov-t">Đang tải nhạc…</span></div><div class="gm-note" id="gm-note" hidden></div></div>
         <div class="gm-opts" id="gm-opts"></div>
         <div class="gm-kq" id="gm-kq" hidden></div>
+        <p class="cap" style="margin-top:22px;color:var(--tx4)">Đoạn nghe thử do Apple Music cung cấp</p>
       </div>
       <div class="gm-end" id="gm-end" hidden></div>
     </div>
@@ -870,6 +871,7 @@ function addSong(o){
   if (o.composer && !s.composer) s.composer = o.composer;
   if (o.year && (!s.year || o.year < s.year)) s.year = o.year;
   if (o.art && !s.art) s.art = o.art;
+  if (o.preview) { const live = /live|remix|karaoke|beat/i.test(o.title); if (!s.preview || (s.pvLive && !live)) { s.preview = o.preview; s.itl = o.itl || ''; s.pvLive = live; } }
   if (o.albumId) {
     const cur = S.albums.get(s.albumId);
     /* Giữ album gốc; chỉ thay khi bài đang ở «Tuyển chọn» hoặc chưa có album. */
@@ -916,15 +918,15 @@ function kindOf(name, count){
 }
 async function syncItunes(force){
   let c = load('mt_it', null);
-  if (!force && c && Date.now() - c.at < 7 * 864e5) { applyItunes(c); return; }
+  if (!force && c && c.v === 2 && Date.now() - c.at < 7 * 864e5) { applyItunes(c); return; }
   try {
     const base = 'https://itunes.apple.com/lookup?id=' + ITUNES_ARTIST_ID + '&country=vn&limit=200';
     const [al, so] = await Promise.all([jsonp(base + '&entity=album'), jsonp(base + '&entity=song')]);
-    c = { at: Date.now(), albums: [], songs: [] };
+    c = { v: 2, at: Date.now(), albums: [], songs: [] };
     for (const r of (al.results || [])) if (r.wrapperType === 'collection' && isMT(r.artistName))
       c.albums.push({ n: r.collectionName, y: +(r.releaseDate || '').slice(0, 4) || 0, k: kindOf(r.collectionName, r.trackCount), art: big(r.artworkUrl100) });
     for (const r of (so.results || [])) if (r.wrapperType === 'track' && r.kind === 'song' && isMT(r.artistName))
-      c.songs.push({ t: r.trackName, a: r.collectionName, y: +(r.releaseDate || '').slice(0, 4) || 0, art: big(r.artworkUrl100) });
+      c.songs.push({ t: r.trackName, a: r.collectionName, y: +(r.releaseDate || '').slice(0, 4) || 0, art: big(r.artworkUrl100), pv: okUrl(r.previewUrl) ? r.previewUrl : '', lk: okUrl(r.trackViewUrl) ? r.trackViewUrl : '' });
     if (c.songs.length || c.albums.length) { save('mt_it', c); applyItunes(c); renderAll(); }
   } catch (e) { /* ngoại tuyến → dùng danh sách gốc */ }
 }
@@ -932,7 +934,7 @@ function applyItunes(c){
   for (const a of c.albums) addAlbum(a.n, a.y, a.k, a.art);
   for (const s of c.songs) {
     const a = addAlbum(s.a, s.y, kindOf(s.a), s.art);
-    addSong({ title: s.t, albumId: a.id, year: s.y, art: s.art });
+    addSong({ title: s.t, albumId: a.id, year: s.y, art: s.art, preview: s.pv, itl: s.lk });
   }
 }
 /* Ảnh bìa cho bài chưa có ảnh: tìm từng bài, lần lượt, có nghỉ. */
@@ -1751,28 +1753,29 @@ function themBaiThieu(){
 /* ════════════ Game «Đoán bài hát» ════════════
    Phát video YouTube của một bài (từ giây 50 để qua đoạn mở đầu), 4 đáp án, 15 giây mỗi câu, 10 câu mỗi lượt.
    Video luôn hiện (yêu cầu của YouTube). Kỷ lục lưu trên máy (mt_game_best). */
-const GM = { n: 0, score: 0, streak: 0, dung: 0, song: null, opts: [], played: [], t0: 0, raf: 0, done: false, player: null, ready: false, pend: null };
-const GM_SO_CAU = 10, GM_GIAY = 15, GM_BAT_DAU = 50;
-const gmPool = () => [...S.songs.values()].filter(x => ytOf(x));
+const GM = { n: 0, score: 0, streak: 0, dung: 0, song: null, opts: [], played: [], t0: 0, raf: 0, done: false };
+const GM_SO_CAU = 10, GM_GIAY = 15;
+const gmAudio = $('#gm-audio');
+const gmPool = () => [...S.songs.values()].filter(x => okUrl(x.preview));
 function gmIntro(){
   $('#gm-best').textContent = load('mt_game_best', 0); $('#gm-pool').textContent = gmPool().length;
   if (!$('#gm-play').hidden || !$('#gm-end').hidden) return;
   $('#gm-start').hidden = false;
 }
-/* Lớp phủ che video: cho = đang tải, phat = đang phát, cham = trình duyệt chặn tự phát, lo = hiện đáp án */
+/* Khung hình: cho = đang tải, phat = đang phát, cham = trình duyệt chặn tự phát, lo = hiện đáp án */
 function gmCover(kieu, chu){
   const c = $('#gm-cover'); c.className = 'gm-cover' + (kieu === 'phat' ? '' : ' ' + kieu); c.style.backgroundImage = '';
-  if (kieu === 'cham') { c.innerHTML = '<div class="eq"><i></i><i></i><i></i><i></i><i></i></div><button id="gm-cham">Chạm để phát</button>'; $('#gm-cham').onclick = () => { try { GM.player.playVideo(); } catch (e) {} gmCover('cho', 'Đang tải nhạc…'); }; return; }
+  if (kieu === 'cham') { c.innerHTML = '<div class="eq"><i></i><i></i><i></i><i></i><i></i></div><button id="gm-cham">Chạm để phát</button>'; $('#gm-cham').onclick = () => { gmAudio.play().catch(() => {}); gmCover('cho', 'Đang tải nhạc…'); }; return; }
   if (!c.querySelector('.eq')) c.innerHTML = '<div class="eq"><i></i><i></i><i></i><i></i><i></i></div><span id="gm-cov-t"></span>';
   $('#gm-cov-t').textContent = chu || '';
   if (kieu === 'lo') { const u = songArt(GM.song); c.style.backgroundImage = artCss(u, GM.song.id); }
 }
 function gmStopAuto(){ clearTimeout(GM.auto); clearInterval(GM.dem); }
-function gmPause(){ gmStopAuto(); cancelAnimationFrame(GM.raf); if (GM.ready) try { GM.player.pauseVideo(); } catch (e) {} }
+function gmPause(){ gmStopAuto(); cancelAnimationFrame(GM.raf); try { gmAudio.pause(); } catch (e) {} }
 function gmShuffle(a){ for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
 $('#gm-go').onclick = gmStart;
 function gmStart(){
-  const pool = gmPool(); if (pool.length < 4) { toast('Cần ít nhất 4 bài có link YouTube'); return; }
+  const pool = gmPool(); if (pool.length < 4) { toast('Chưa tải được đoạn nghe thử — kiểm tra mạng rồi thử lại'); return; }
   Object.assign(GM, { n: 0, score: 0, streak: 0, dung: 0, played: [] });
   $('#gm-start').hidden = true; $('#gm-end').hidden = true; $('#gm-play').hidden = false;
   gmNext();
@@ -1785,27 +1788,13 @@ function gmNext(){
   Object.assign(GM, { song, opts: gmShuffle([song, ...sai]), done: false, t0: 0 }); GM.n++;
   $('#gm-n').textContent = GM.n; $('#gm-score').textContent = GM.score; $('#gm-streak').textContent = GM.streak;
   $('#gm-bar').style.transform = 'scaleX(1)'; $('#gm-kq').hidden = true;
-  gmCover('cho', 'Đang tải nhạc…'); clearTimeout(GM.chan); GM.chan = setTimeout(() => { if (!GM.t0 && !GM.done) gmCover('cham'); }, 3000);
+  gmCover('cho', 'Đang tải nhạc…');
   $('#gm-opts').innerHTML = GM.opts.map((x, i) => `<button data-i="${i}"><i>${'ABCD'[i]}</i>${esc(x.title)}</button>`).join('');
-  gmPlay(ytOf(song));
+  gmAudio.src = song.preview; gmAudio.currentTime = 0;
+  gmAudio.play().catch(() => { if (!GM.done) gmCover('cham'); });     // trình duyệt chặn tự phát → chạm để phát
 }
-async function gmPlay(vid){
-  if (location.protocol === 'file:') { $('#gm-note').hidden = false; $('#gm-note').textContent = 'YouTube chỉ phát khi trang đã nằm trên web (https://…). Bạn vẫn có thể đoán, đồng hồ chạy ngay.'; gmTimer(); return; }
-  $('#gm-note').hidden = true;
-  try { await loadYtApi(); } catch (e) { toast(e.message); gmTimer(); return; }
-  if (GM.player && GM.ready) { GM.player.loadVideoById({ videoId: vid, startSeconds: GM_BAT_DAU }); return; }
-  GM.pend = vid;
-  if (GM.player) return;
-  GM.player = new window.YT.Player('game-player', {
-    width: '100%', height: '100%',
-    playerVars: { playsinline: 1, rel: 0, modestbranding: 1, controls: 0, disablekb: 1, fs: 0, iv_load_policy: 3 },
-    events: {
-      onReady: () => { GM.ready = true; if (GM.pend) GM.player.loadVideoById({ videoId: GM.pend, startSeconds: GM_BAT_DAU }); },
-      onStateChange: e => { if (e.data === window.YT.PlayerState.PLAYING && !GM.done) { gmCover('phat', 'Đang phát…'); if (!GM.t0) gmTimer(); } },
-      onError: () => { toast('Video này không phát được — chuyển câu khác'); if (!GM.done) { GM.n--; gmNext(); } }
-    }
-  });
-}
+gmAudio.addEventListener('playing', () => { if (GM.done || $('#v-game').hidden) return; gmCover('phat', 'Đang phát…'); if (!GM.t0) gmTimer(); });
+gmAudio.addEventListener('error', () => { if (GM.done || $('#gm-play').hidden) return; toast('Đoạn nhạc này không tải được — chuyển câu khác'); GM.n--; gmNext(); });
 function gmTimer(){
   GM.t0 = performance.now(); cancelAnimationFrame(GM.raf);
   const tick = now => {
@@ -1831,7 +1820,7 @@ function gmAnswer(i){
   const x = GM.song, u = songArt(x), cuoi = GM.n >= GM_SO_CAU;
   $('#gm-kq').innerHTML = `<span class="thumb${cvCls(u, x.id)}" style="background-image:${esc(artCss(u, x.id))}">${cvx({ l: false, i: x.title.charAt(0).toUpperCase() })}</span>
     <span class="mid"><b>${ok ? 'Đúng rồi! +' + them : i < 0 ? 'Hết giờ' : 'Chưa đúng'}</b><small>${esc(x.title)}${albumOf(x) ? ' · ' + esc(albumOf(x)) : ''}</small></span>
-    <span class="acts"><button class="pillbtn" data-song="${esc(x.id)}">Mở lời</button><button class="pillbtn dark" id="gm-tiep">${cuoi ? 'Xem kết quả' : 'Câu tiếp →'}</button></span>`;
+    <span class="acts">${okUrl(x.itl) ? `<a class="pillbtn" href="${esc(x.itl)}" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;text-decoration:none">Apple Music ↗</a>` : ''}<button class="pillbtn" data-song="${esc(x.id)}">Mở lời</button><button class="pillbtn dark" id="gm-tiep">${cuoi ? 'Xem kết quả' : 'Câu tiếp →'}</button></span>`;
   $('#gm-kq').hidden = false; clearTimeout(GM.chan);
   gmCover('lo', x.title);
   const di = () => { gmStopAuto(); cuoi ? gmEnd() : gmNext(); };
