@@ -457,7 +457,8 @@ mark{background:none;color:var(--rose);font-style:italic}
 .ytchip:hover{color:var(--fg);border-color:var(--fg2)}
 .ytchip svg{color:var(--rose)}
 .ytp{position:absolute;left:50%;bottom:calc(88px + env(safe-area-inset-bottom));transform:translateX(-50%);z-index:4;width:min(400px,calc(100% - 32px));
-  border-radius:16px;overflow:hidden;background:#000;border:1px solid var(--cardb);box-shadow:0 24px 44px -16px rgba(0,0,0,.75);animation:vao .4s var(--ease)}
+  border-radius:16px;overflow:hidden;background:#000;border:1px solid var(--cardb);box-shadow:0 24px 44px -16px rgba(0,0,0,.75);animation:vaoyt .4s var(--ease)}
+@keyframes vaoyt{from{opacity:0;transform:translate(-50%,12px)}to{opacity:1;transform:translate(-50%,0)}}
 .ytp-hd{display:flex;align-items:center;gap:6px;height:38px;padding:0 4px 0 12px;background:var(--glass);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);color:var(--fg)}
 .ytp-hd .cap{flex:1;font-size:9px;color:var(--fg2)}
 .ytp-hd button{height:28px;min-width:28px;padding:0 7px;border-radius:999px;font-size:11px;font-weight:500;color:var(--fg2);display:grid;place-items:center}
@@ -467,7 +468,7 @@ mark{background:none;color:var(--rose);font-style:italic}
 .ytp-v iframe,.ytp-v #yt-player{position:absolute;inset:0;width:100%;height:100%;border:0}
 .ytp-note{position:absolute;inset:0;display:grid;place-items:center;padding:22px;text-align:center;font-size:12.5px;line-height:1.6;color:rgba(255,255,255,.7);background:#0d0d0e}
 #lyr.has-yt .lyr-scroll{-webkit-mask:linear-gradient(transparent 0,#000 30px,#000 calc(100% - 330px),transparent calc(100% - 250px));mask:linear-gradient(transparent 0,#000 30px,#000 calc(100% - 330px),transparent calc(100% - 250px))}
-@media(min-width:1000px){.ytp{left:auto;right:24px;bottom:24px;transform:none;width:380px}#lyr.has-yt .lyr-scroll{-webkit-mask:linear-gradient(transparent 0,#000 30px,#000 calc(100% - 120px),transparent calc(100% - 24px));mask:linear-gradient(transparent 0,#000 30px,#000 calc(100% - 120px),transparent calc(100% - 24px))}}
+@media(min-width:1000px){.ytp{left:auto;right:24px;bottom:24px;transform:none;width:380px;animation-name:vao}#lyr.has-yt .lyr-scroll{-webkit-mask:linear-gradient(transparent 0,#000 30px,#000 calc(100% - 120px),transparent calc(100% - 24px));mask:linear-gradient(transparent 0,#000 30px,#000 calc(100% - 120px),transparent calc(100% - 24px))}}
 /* Thanh dưới trang lời */
 .ctl{position:absolute;left:50%;bottom:calc(16px + env(safe-area-inset-bottom));transform:translateX(-50%);z-index:4;width:min(400px,calc(100% - 32px));height:60px;
   display:flex;align-items:center;gap:10px;padding:0 8px;border-radius:999px;background:var(--glass);border:1px solid var(--cardb);
@@ -1116,6 +1117,7 @@ class Coverflow {
     });
     const end = e => {
       if (!drag || e.pointerId !== pid) return; drag = false;
+      if (!moved && (e.type === 'pointercancel' || Math.hypot(e.clientX - sx, e.clientY - sy) > 8)) return;   // cuộn trang, không phải chạm
       if (this.pend) { cancelAnimationFrame(this.pend); this.pend = 0; }
       if (!moved) { const c = e.target.closest('.cf-card'); if (c) this.tap(+c.dataset.i); return; }
       const fling = -vel * 260 / this.step();
