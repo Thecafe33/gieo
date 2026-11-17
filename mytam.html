@@ -382,15 +382,15 @@ body.night::after{content:"";position:fixed;left:0;right:0;bottom:0;height:46vh;
 .hh{display:flex;flex-direction:column;align-items:center;text-align:center;margin:0 0 30px}
 .hh-stk{position:relative;width:min(300px,78vw);aspect-ratio:1;touch-action:pan-y;margin-bottom:6px}
 .hh-stk canvas{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:grab}
-.hh-stk img{position:absolute;left:9%;top:9%;width:82%;height:82%;border-radius:50%;border:5px solid #fff;box-shadow:0 18px 40px -16px rgba(0,0,0,.7);transition:opacity .5s}
+.hh-stk img{position:absolute;left:6%;top:6%;width:88%;height:88%;object-fit:contain;filter:drop-shadow(0 16px 22px rgba(0,0,0,.55));transition:opacity .5s}
 .hh-stk.on img{opacity:0;pointer-events:none}
 .hh h3{font-family:var(--disp);font-weight:300;font-size:30px;margin:8px 0 4px}
 .hh p{font-size:12.5px;color:var(--tx3);margin:0 0 14px}
 .hh-chua{font-size:13px;color:var(--tx3);margin:0 0 26px;text-align:center}
 .hh-chua b{color:var(--tx2)}
 .gm-hh{display:flex;gap:14px;margin:0 0 26px;align-items:center}
-.gm-hh .o{width:64px;height:64px;border-radius:50%;flex:none;background-size:cover;box-shadow:0 0 0 3px #fff,0 10px 24px -10px rgba(0,0,0,.8)}
-.gm-hh .o.chua{background:none;box-shadow:none;border:1px dashed var(--line2);display:grid;place-items:center;font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--tx4)}
+.gm-hh .o{width:64px;height:64px;flex:none;background:center/contain no-repeat;filter:drop-shadow(0 8px 12px rgba(0,0,0,.6))}
+.gm-hh .o.chua{background:none;box-shadow:none;border-radius:50%;filter:none;border:1px dashed var(--line2);display:grid;place-items:center;font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--tx4)}
 .gm-hh small{display:block;font-size:11.5px;color:var(--tx3);line-height:1.5}
 .gm-end{padding:10px 0}
 .gm-end .tong{text-align:center}
@@ -1939,46 +1939,67 @@ const HH_GOI = ['fan', 'triam'];
 const hhCan = g => Math.ceil(g.n / 2);
 const hhAll = () => load('mt_huy_hieu', {});
 async function hhFont(){ try { await Promise.race([Promise.all([document.fonts.load('italic 300 100px "Noto Serif Display"'), document.fonts.load('600 40px "Be Vietnam Pro"')]), sleep(1500)]); } catch (e) {} }
+/* Huy hiệu trái tim kiểu Y2K: tim bóng kính + viền vinyl trắng + vệt chrome, một ngôi sao chrome lòi ra mép. Nền trong suốt = đường cắt miếng dán. */
+const HH_MAU = { fan: ['#3f68e6', '#2241b8', '#11236e'], triam: ['#cfa4ff', '#8d4dff', '#4a1aa6'] };
 function veHuyHieu(k, r){
-  const g = GOI[k], C = document.createElement('canvas'); C.width = C.height = 1024;
-  const x = C.getContext('2d'), c = 512, P = k === 'triam' ? ['#e3d6ff', '#8b5cf6', '#1d0b45', '#ffd98a'] : ['#ffc2d6', '#ec3f7a', '#4a0824', '#ffe4ee'];
-  let gr = x.createRadialGradient(c, 380, 30, c, c, 540); gr.addColorStop(0, P[0]); gr.addColorStop(.5, P[1]); gr.addColorStop(1, P[2]);
+  const g = GOI[k], M = HH_MAU[k], C = document.createElement('canvas'); C.width = C.height = 1024;
+  const x = C.getContext('2d'), cx = 512, s = 25, cy = 470;
+  const tim = () => { x.beginPath(); for (let i = 0; i <= 240; i++) { const t = i / 240 * Math.PI * 2;
+    const X = 16 * Math.pow(Math.sin(t), 3), Y = 13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t);
+    i ? x.lineTo(cx + X * s, cy - Y * s) : x.moveTo(cx + X * s, cy - Y * s); } x.closePath(); };
+  const sao = (sx, sy, R) => { x.beginPath(); x.moveTo(sx, sy - R); x.quadraticCurveTo(sx + R * .12, sy - R * .12, sx + R, sy); x.quadraticCurveTo(sx + R * .12, sy + R * .12, sx, sy + R);
+    x.quadraticCurveTo(sx - R * .12, sy + R * .12, sx - R, sy); x.quadraticCurveTo(sx - R * .12, sy - R * .12, sx, sy - R); x.closePath(); };
+  const chrome = (y0, y1) => { const gr = x.createLinearGradient(0, y0, 0, y1); gr.addColorStop(0, '#ffffff'); gr.addColorStop(.45, '#c9d2e6'); gr.addColorStop(.55, '#8e9ab5'); gr.addColorStop(1, '#f4f7ff'); return gr; };
+  x.lineJoin = 'round';
+  // viền vinyl trắng (tim + sao) → chính là đường cắt
+  tim(); x.lineWidth = 60; x.strokeStyle = '#fff'; x.stroke(); x.fillStyle = '#fff'; x.fill();
+  sao(842, 150, 92); x.lineWidth = 44; x.stroke(); x.fill();
+  // thân tim: màu gói, sáng ở trên
+  x.save(); tim(); x.clip();
+  let gr = x.createLinearGradient(0, 70, 0, 920); gr.addColorStop(0, M[0]); gr.addColorStop(.5, M[1]); gr.addColorStop(1, M[2]);
   x.fillStyle = gr; x.fillRect(0, 0, 1024, 1024);
-  x.save(); x.translate(c, c);                                                       // tia sáng từ tâm
-  for (let i = 0; i < 40; i++) { x.rotate(Math.PI / 20); if (i % 2) continue; x.fillStyle = 'rgba(255,255,255,.06)'; x.beginPath(); x.moveTo(0, 0); x.lineTo(-44, -540); x.lineTo(44, -540); x.fill(); }
+  gr = x.createRadialGradient(cx, 860, 40, cx, 760, 520); gr.addColorStop(0, 'rgba(255,255,255,.22)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+  x.fillStyle = gr; x.fillRect(0, 0, 1024, 1024);                                   // hắt sáng đáy kiểu bong bóng
+  x.save(); x.translate(330, 250); x.rotate(-0.55);                                 // vệt bóng kính
+  gr = x.createLinearGradient(0, -70, 0, 70); gr.addColorStop(0, 'rgba(255,255,255,.85)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+  x.fillStyle = gr; x.beginPath(); x.ellipse(0, 0, 150, 62, 0, 0, Math.PI * 2); x.fill(); x.restore();
+  x.fillStyle = 'rgba(255,255,255,.9)'; x.beginPath(); x.arc(470, 205, 17, 0, Math.PI * 2); x.fill();
+  tim(); x.lineWidth = 26; x.strokeStyle = chrome(90, 900); x.stroke();            // viền chrome mỏng phía trong
   x.restore();
-  const vong = (R, w, a) => { x.beginPath(); x.arc(c, c, R, 0, Math.PI * 2); x.lineWidth = w; x.globalAlpha = a; x.strokeStyle = P[3]; x.stroke(); x.globalAlpha = 1; };
-  vong(488, 10, .9); vong(466, 2, .7); vong(352, 3, .85); vong(338, 1.5, .5);
-  // chữ chạy vòng
-  const txt = 'SEE THE LIGHT ✦ DAY 2 ✦ MỸ TÂM ✦ FANMADE ✦ '; x.font = '600 38px "Be Vietnam Pro"'; x.fillStyle = P[3]; x.textAlign = 'center'; x.textBaseline = 'middle';
-  const ws = [...txt].map(ch => x.measureText(ch).width), tot = ws.reduce((a, b) => a + b, 0), R = 410, lap = Math.max(1, Math.floor(2 * Math.PI * R / (tot * 1.15)));
-  const k2 = 2 * Math.PI * R / (tot * lap); let ang = -Math.PI / 2;
-  for (let l = 0; l < lap; l++) [...txt].forEach((ch, i) => { const a = ws[i] * k2 / R; ang += a / 2; x.save(); x.translate(c + R * Math.cos(ang), c + R * Math.sin(ang)); x.rotate(ang + Math.PI / 2); x.fillText(ch, 0, 0); x.restore(); ang += a / 2; });
-  // sao 4 cánh
-  const sao = (sx, sy, s) => { x.beginPath(); x.moveTo(sx, sy - s); x.quadraticCurveTo(sx, sy, sx + s, sy); x.quadraticCurveTo(sx, sy, sx, sy + s); x.quadraticCurveTo(sx, sy, sx - s, sy); x.quadraticCurveTo(sx, sy, sx, sy - s); x.fillStyle = '#fff'; x.fill(); };
-  sao(c, 250, 34); sao(c - 70, 278, 14); sao(c + 70, 278, 14);
-  x.fillStyle = P[3]; x.font = '600 30px "Be Vietnam Pro"'; x.fillText('H U Y   H I Ệ U', c, 345);
-  x.save(); x.shadowColor = 'rgba(0,0,0,.35)'; x.shadowBlur = 30; x.fillStyle = '#fff';
-  x.font = 'italic 300 ' + (g.ten.length > 4 ? 168 : 200) + 'px "Noto Serif Display"'; x.fillText(g.ten, c, 500); x.restore();
-  x.strokeStyle = P[3]; x.globalAlpha = .6; x.lineWidth = 2; x.beginPath(); x.moveTo(c - 150, 610); x.lineTo(c + 150, 610); x.stroke(); x.globalAlpha = 1;
-  x.fillStyle = '#fff'; x.font = '600 44px "Be Vietnam Pro"'; x.fillText('Đúng ' + r.dung + ' / ' + r.tong + ' câu', c, 668);
-  const d = new Date(r.at); x.fillStyle = P[3]; x.font = '400 32px "Be Vietnam Pro"';
-  x.fillText(r.diem.toLocaleString('vi-VN') + ' điểm · ' + pad2(d.getDate()) + '/' + pad2(d.getMonth() + 1) + '/' + d.getFullYear(), c, 728);
+  // sao chrome
+  sao(842, 150, 72); x.fillStyle = chrome(80, 220); x.fill();
+  sao(290, 560, 20); x.fillStyle = 'rgba(255,255,255,.9)'; x.fill();
+  sao(745, 700, 13); x.fill();
+  // chữ
+  x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillStyle = 'rgba(255,255,255,.88)';
+  x.font = '600 30px "Be Vietnam Pro"'; try { x.letterSpacing = '7px'; } catch (e) {}
+  x.fillText('SEE THE LIGHT · DAY 2', cx, 405);
+  try { x.letterSpacing = '-4px'; } catch (e) {}
+  x.save(); x.shadowColor = 'rgba(0,0,30,.35)'; x.shadowBlur = 24; x.shadowOffsetY = 8;
+  x.font = '700 ' + (g.ten.length > 4 ? 150 : 190) + 'px "Be Vietnam Pro"'; x.fillStyle = chrome(445, 590);
+  x.fillText(g.ten.toUpperCase(), cx, 515); x.restore();
+  try { x.letterSpacing = '0px'; } catch (e) {}
+  const t = r.dung + '/' + r.tong + ' câu · ' + r.diem.toLocaleString('vi-VN') + ' điểm';
+  x.font = '600 30px "Be Vietnam Pro"'; const w = x.measureText(t).width + 56;
+  x.beginPath(); x.roundRect ? x.roundRect(cx - w / 2, 608, w, 58, 29) : x.rect(cx - w / 2, 608, w, 58);
+  x.fillStyle = 'rgba(255,255,255,.16)'; x.fill(); x.lineWidth = 2; x.strokeStyle = 'rgba(255,255,255,.55)'; x.stroke();
+  x.fillStyle = '#fff'; x.fillText(t, cx, 638);
   return C;
 }
+function hhNho(C, n){ const c = document.createElement('canvas'); c.width = c.height = n; c.getContext('2d').drawImage(C, 0, 0, n, n); return c.toDataURL('image/png'); }
 async function hhKhoGoc(){   // màn chọn gói: các huy hiệu đã có
   const all = hhAll(), box = $('#gm-hh'); if (!box) return;
   await hhFont();
   box.innerHTML = HH_GOI.map(k => { const r = all[k];
-    return r ? `<span class="o" style="background-image:url(${veHuyHieu(k, r).toDataURL('image/jpeg', .85)})" title="Huy hiệu ${GOI[k].ten}"></span>` : `<span class="o chua">${GOI[k].ten}</span>`; }).join('') +
-    `<small>Huy hiệu hologram cho gói <b>Fan</b> và <b>Tri âm</b><br>Chơi hết gói, đúng từ một nửa số câu trở lên</small>`;
+    return r ? `<span class="o" style="background-image:url(${hhNho(veHuyHieu(k, r), 192)})" title="Huy hiệu ${GOI[k].ten}"></span>` : `<span class="o chua">${GOI[k].ten}</span>`; }).join('') +
+    `<small>Huy hiệu trái tim hologram cho gói <b>Fan</b> và <b>Tri âm</b><br>Chơi hết gói, đúng từ một nửa số câu trở lên</small>`;
 }
 function hhHuy(){ if (GM.hh) { GM.hh.destroy(); GM.hh = null; } }
 async function hhHien(r){   // màn kết quả: miếng dán hologram của huy hiệu vừa nhận
   await hhFont(); if ($('#gm-end').hidden) return;
   const C = veHuyHieu(GM.goi, r), box = $('#hh-stk'); if (!box) return;
-  box.querySelector('img').src = C.toDataURL('image/jpeg', .9);
-  hhHuy(); GM.hh = window.HoloSticker ? window.HoloSticker({ box, cv: box.querySelector('canvas'), src: C, tron: true, border: 0.035, onFail: () => box.classList.add('tinh') }) : null;
+  box.querySelector('img').src = hhNho(C, 600);
+  hhHuy(); GM.hh = window.HoloSticker ? window.HoloSticker({ box, cv: box.querySelector('canvas'), src: C, mask: true, onFail: () => box.classList.add('tinh') }) : null;
   $('#hh-luu').onclick = () => C.toBlob(b => { const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = 'huy-hieu-' + GM.goi + '-mytam.png'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000); }, 'image/png');
 }
 function gmIntro(){
@@ -2156,7 +2177,7 @@ window.addEventListener('scroll', () => { if (view !== 'home') return; cancelAni
 /* ════════════ Miếng dán hologram (Three.js + shader tự viết) — dùng cho poster «See the Light Day 2» và huy hiệu game ════════════
    Kéo ở giữa: nghiêng + uốn. Kéo từ mép/góc: bóc (cuộn như vinyl, tối đa ~2/3), lộ mặt giấy trắng, bóng đổ mềm; thả tay bật về phẳng.
    Tự đung đưa khi để yên. Chuột + cảm ứng. Three.js chỉ tải khi cần; dừng vẽ khi khuất.
-   window.HoloSticker({ box, cv, src: Image|Canvas, tron: true (hình tròn), border, onFail }) → { wake, destroy } */
+   window.HoloSticker({ box, cv, src: Image|Canvas, tron: true (hình tròn) | mask: true (cắt theo nền trong suốt của ảnh), border, onFail }) → { wake, destroy } */
 (function(){
   let threeP = null;
   function loadThree(){
@@ -2182,14 +2203,14 @@ window.addEventListener('scroll', () => { if (view !== 'home') return; cancelAni
       const scene = new T.Scene(), cam = new T.PerspectiveCamera(32, 1, 0.1, 50);
       const sw = src.naturalWidth || src.width, sh = src.naturalHeight || src.height;
       const AR = sw && sh ? sw / sh : 0.8;
-      const B = o.border != null ? o.border : 0.02, PW = 1.0, PH = PW / AR, W = PW + 2 * B, H = PH + 2 * B;   // khổ miếng dán (đơn vị cảnh)
+      const B = o.mask ? 0 : o.border != null ? o.border : 0.02, PW = 1.0, PH = PW / AR, W = PW + 2 * B, H = PH + 2 * B;   // khổ miếng dán (đơn vị cảnh)
       const RO = o.tron ? Math.min(W, H) / 2 : 0.045, RI = o.tron ? Math.min(PW, PH) / 2 : 0.028;            // bo góc ngoài / trong (tròn = bán kính nửa cạnh)
       const geo = new T.PlaneGeometry(W, H, 90, Math.round(90 * H / W));
       const tex = new T.Texture(src); tex.generateMipmaps = false; tex.minFilter = T.LinearFilter; tex.magFilter = T.LinearFilter; tex.needsUpdate = true;
       const U = {
         uTex: { value: tex }, uTime: { value: 0 }, uTilt: { value: new T.Vector2() }, uSize: { value: new T.Vector2(W, H) }, uBorder: { value: B },
         uBend: { value: new T.Vector2() }, uPeel: { value: 0 }, uP0: { value: new T.Vector2() }, uP1: { value: new T.Vector2() }, uR: { value: 0.06 },
-        uRo: { value: RO }, uRi: { value: RI }
+        uRo: { value: RO }, uRi: { value: RI }, uMask: { value: o.mask ? 1 : 0 }
       };
       const DEFORM = `
         uniform vec2 uBend; uniform float uPeel; uniform vec2 uP0; uniform vec2 uP1; uniform float uR;
@@ -2217,13 +2238,19 @@ window.addEventListener('scroll', () => { if (view !== 'home') return; cancelAni
           varying vec2 vUv; varying vec3 vW; varying float vH;
           void main(){ vUv = uv; vec3 p = deform(position); vH = p.z; vec4 w = modelMatrix * vec4(p, 1.0); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }`,
         fragmentShader: SDF + `
-          uniform sampler2D uTex; uniform float uTime; uniform vec2 uTilt; uniform vec2 uSize; uniform float uBorder; uniform float uRo; uniform float uRi;
+          uniform sampler2D uTex; uniform float uTime; uniform vec2 uTilt; uniform vec2 uSize; uniform float uBorder; uniform float uRo; uniform float uRi; uniform float uMask;
           varying vec2 vUv; varying vec3 vW; varying float vH;
           vec3 rainbow(float t){ return 0.5 + 0.5 * cos(6.28318 * (vec3(0.0, 0.33, 0.67) + t)); }
           void main(){
             vec2 p = (vUv - 0.5) * uSize;
-            float d = sdRound(p, uSize * 0.5, uRo), aa = fwidth(d) * 1.2;
-            float alpha = 1.0 - smoothstep(-aa, aa, d);
+            float d, alpha; vec4 mk = vec4(0.0);
+            if (uMask > 0.5) {                                       // cắt theo hình trong ảnh (nền trong suốt)
+              mk = texture2D(uTex, vUv); float aw = fwidth(mk.a) + 0.02;
+              alpha = smoothstep(0.5 - aw, 0.5 + aw, mk.a); d = (0.5 - mk.a) * 0.024;
+            } else {
+              d = sdRound(p, uSize * 0.5, uRo); float aa = fwidth(d) * 1.2;
+              alpha = 1.0 - smoothstep(-aa, aa, d);
+            }
             if (alpha < 0.01) discard;
             vec3 N = normalize(cross(dFdx(vW), dFdy(vW)));
             vec3 V = normalize(cameraPosition - vW);
@@ -2236,10 +2263,14 @@ window.addEventListener('scroll', () => { if (view !== 'home') return; cancelAni
               gl_FragColor = vec4(paper * (0.78 + 0.22 * dif), alpha); return;
             }
             vec2 inner = uSize * 0.5 - uBorder;
-            float di = sdRound(p, inner, uRi), ai = fwidth(di);
-            vec2 tuv = p / (inner * 2.0) + 0.5;
-            vec3 poster = texture2D(uTex, clamp(tuv, 0.0, 1.0)).rgb;
-            float inP = 1.0 - smoothstep(-ai, ai, di);
+            vec2 tuv; vec3 poster; float inP;
+            if (uMask > 0.5) { tuv = vUv; poster = mk.rgb; inP = 1.0; }
+            else {
+              float di = sdRound(p, inner, uRi), ai = fwidth(di);
+              tuv = p / (inner * 2.0) + 0.5;
+              poster = texture2D(uTex, clamp(tuv, 0.0, 1.0)).rgb;
+              inP = 1.0 - smoothstep(-ai, ai, di);
+            }
             vec3 col = mix(vec3(0.99, 0.985, 0.99), poster, inP);
             float lum = dot(poster, vec3(0.299, 0.587, 0.114));
             // ánh hologram cầu vồng — đổi theo góc nghiêng + góc nhìn
@@ -2284,8 +2315,14 @@ window.addEventListener('scroll', () => { if (view !== 'home') return; cancelAni
             vec3 s = vec3(p.xy + vec2(0.035, -0.055) * (0.25 + vH * 3.0), -0.006);
             gl_Position = projectionMatrix * modelViewMatrix * vec4(s, 1.0); }`,
         fragmentShader: SDF + `
-          uniform vec2 uSize; uniform float uRo; varying vec2 vUv; varying float vH;
-          void main(){ vec2 p = (vUv - 0.5) * uSize; float d = sdRound(p, uSize * 0.5, uRo);
+          uniform vec2 uSize; uniform float uRo; uniform float uMask; uniform sampler2D uTex; varying vec2 vUv; varying float vH;
+          void main(){
+            if (uMask > 0.5) {                                       // bóng theo hình trong ảnh, làm mờ 9 điểm
+              float bl = (0.03 + vH * 0.9) / uSize.x, a = 0.0;
+              for (int i = -1; i <= 1; i++) for (int j = -1; j <= 1; j++) a += texture2D(uTex, vUv + vec2(float(i), float(j)) * bl).a;
+              gl_FragColor = vec4(0.1, 0.01, 0.05, a / 9.0 * 0.42 / (1.0 + vH * 4.0)); return;
+            }
+            vec2 p = (vUv - 0.5) * uSize; float d = sdRound(p, uSize * 0.5, uRo);
             float blur = 0.03 + vH * 0.9; float a = 1.0 - smoothstep(-blur, blur, d);
             gl_FragColor = vec4(0.1, 0.01, 0.05, a * 0.42 / (1.0 + vH * 4.0)); }`
       });
@@ -2314,10 +2351,14 @@ window.addEventListener('scroll', () => { if (view !== 'home') return; cancelAni
       }
       const S = { mode: '', x0: 0, y0: 0, lx: 0, ly: 0, rx: 0, ry: 0, trx: 0, try_: 0, bx: 0, by: 0, peelBack: 0 };
       const EDGE = 0.15;
+      let MK = null; if (o.mask) try { MK = src.getContext('2d').getImageData(0, 0, sw, sh).data; } catch (e) {}
+      const aAt = (x, y) => { if (!MK) return 1; const c = Math.floor((x / W + 0.5) * sw), r = Math.floor((0.5 - y / H) * sh);
+        return c < 0 || r < 0 || c >= sw || r >= sh ? 0 : MK[(r * sw + c) * 4 + 3] / 255; };
       function down(cx, cy){
         const p = local(cx, cy); if (!p || Math.abs(p.x) > W / 2 || Math.abs(p.y) > H / 2) return false;
         let nearEdge;
-        if (o.tron) { const R = Math.hypot(p.x, p.y); if (R > W / 2) return false; nearEdge = R > W / 2 - EDGE; }
+        if (o.mask) { if (aAt(p.x, p.y) < 0.5) return false; nearEdge = [0, 1, 2, 3, 4, 5, 6, 7].some(k => aAt(p.x + EDGE * Math.cos(k * Math.PI / 4), p.y + EDGE * Math.sin(k * Math.PI / 4)) < 0.5); }
+        else if (o.tron) { const R = Math.hypot(p.x, p.y); if (R > W / 2) return false; nearEdge = R > W / 2 - EDGE; }
         else nearEdge = Math.abs(p.x) > W / 2 - EDGE || Math.abs(p.y) > H / 2 - EDGE;
         S.mode = nearEdge ? 'peel' : 'tilt'; S.x0 = S.lx = cx; S.y0 = S.ly = cy; S.peelBack = 0;
         if (nearEdge) { U.uP0.value.set(p.x, p.y); U.uP1.value.set(p.x, p.y); U.uPeel.value = 1; }
