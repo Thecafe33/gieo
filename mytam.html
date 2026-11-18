@@ -318,12 +318,12 @@ body.night::after{content:"";position:fixed;left:0;right:0;bottom:0;height:46vh;
 .gm-goi .tim .t{font-size:30px}
 @keyframes dap{0%,100%{transform:scale(1)}8%{transform:scale(1.04)}16%{transform:scale(1)}24%{transform:scale(1.03)}32%{transform:scale(1)}}
 @media(prefers-reduced-motion:reduce){.gm-goi .tim-in{animation:none}}
-.gm-pop{position:fixed;inset:0;z-index:60;display:flex;align-items:flex-end;justify-content:center}
+.gm-pop{position:fixed;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;padding:20px}
 .gm-pop[hidden]{display:none}
 .gm-pop-bg{position:absolute;inset:0;background:rgba(6,5,8,.62);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}
-.gm-pop-c{--c:#ff3d84;position:relative;width:min(440px,100%);background:#141316;border:1px solid var(--line2);border-bottom:0;border-radius:28px 28px 0 0;overflow:hidden;
-  padding-bottom:calc(20px + env(safe-area-inset-bottom));animation:len .4s var(--ease)}
-@media(min-width:620px){.gm-pop{align-items:center}.gm-pop-c{border-radius:28px;border-bottom:1px solid var(--line2);padding-bottom:20px}}
+.gm-pop-c{--c:#ff3d84;position:relative;width:min(420px,100%);max-height:100%;overflow:auto;background:#141316;border:1px solid var(--line2);border-radius:28px;
+  padding-bottom:20px;box-shadow:0 30px 80px -20px rgba(0,0,0,.8);animation:gpVao .38s var(--spring)}
+@keyframes gpVao{from{transform:scale(.9);opacity:0}to{transform:none;opacity:1}}
 .gp-hd{position:relative;background:var(--c);color:#fff;padding:22px 24px 20px;overflow:hidden}
 .gp-hd::before{content:"";position:absolute;right:-40px;top:-70px;width:220px;height:220px;border-radius:50%;background:radial-gradient(closest-side,rgba(255,255,255,.3),transparent)}
 .gp-hd small{position:relative;display:block;font-size:10px;font-weight:600;letter-spacing:.24em;text-transform:uppercase;opacity:.85}
@@ -1948,7 +1948,8 @@ $('#gm-goi').innerHTML = Object.entries(GOI).map(([k, g]) => k === 'sieu'
   ? `<button class="tim" data-g="${k}" style="--c:${g.mau}"><span class="tim-in" style="color:${g.mau}">${TIM_SVG}<span class="t" style="color:#fff">${g.ten}!</span><span class="n" style="color:#fff">${g.n} câu</span></span></button>`
   : `<button data-g="${k}" style="--c:${g.mau}"><span class="t">${g.ten}</span><span class="n">${g.n} câu</span></button>`).join('');
 const gmAudio = $('#gm-audio');
-const gmPref = Object.assign({ goi: 'de', auto: false }, load('mt_game_pref', {}));
+const gmPref = Object.assign({ goi: 'de', auto: true }, load('mt_game_pref', {}));
+if (!gmPref.v2) { gmPref.auto = true; gmPref.v2 = 1; save('mt_game_pref', gmPref); }   // tự chuyển câu: mặc định BẬT (kể cả máy đã lưu tắt từ bản cũ)
 if (!GOI[gmPref.goi]) gmPref.goi = ({ 10: 'de', 20: 'kho', 30: 'fan', 40: 'triam', 60: 'sieu' })[gmPref.goi] || 'de';
 const gmBestKey = k => 'mt_game_best_' + k;
 const gmPool = () => [...S.songs.values()].filter(x => okUrl(x.preview));
@@ -1973,7 +1974,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('#gm-po
 }));
 /* ── Huy hiệu: chỉ gói Fan và Tri âm, nhận khi chơi hết gói và đúng ít nhất nửa số câu. Lưu trên máy: mt_huy_hieu {goi: {dung, tong, diem, at}} ── */
 const HH_GOI = ['fan', 'triam', 'sieu'];
-const hhCan = g => Math.ceil(g.n / 2);
+const hhCan = g => g === GOI.sieu ? Math.floor(g.n * 0.9) + 1 : Math.ceil(g.n / 2);   // Siêu Tri Âm: trên 90% (≥ 55/60); Fan, Tri âm: từ nửa số câu
 const hhAll = () => load('mt_huy_hieu', {});
 async function hhFont(){ try { await Promise.race([Promise.all([document.fonts.load('italic 300 100px "Noto Serif Display"'), document.fonts.load('600 40px "Be Vietnam Pro"')]), sleep(1500)]); } catch (e) {} }
 /* Huy hiệu trái tim kiểu Y2K: tim bóng kính + viền vinyl trắng + vệt chrome, một ngôi sao chrome lòi ra mép. Nền trong suốt = đường cắt miếng dán. */
