@@ -1073,7 +1073,7 @@ function addAlbum(title, year, kind, art){
 /* Cùng một bài nhưng nguồn ngoài (Apple Music) viết khác chính tả → gộp về một mã bài. */
 const ALIAS = { 'goi-tinh-yeu-cua-em': 'gui-tinh-yeu-cua-em', 'tinh-yeu-nhu-la-bay-xa': 'tinh-nhu-la-bay-xa' };
 /* Không phải bài hát (nhạc nền không lời) → không đưa vào danh sách. */
-const BO_BAI = /^(ca-?phe|ca-?fe|cafe)-sua/;
+const BO_BAI = /^((ca-?phe|ca-?fe|cafe)-sua|ai-gieo-sau-tuong-tu)/;   // + bài của ca sĩ khác trùng tên «Mỹ Tâm»
 function addSong(o){
   const bt = baseTitle(o.title); if (!bt) return null;
   const id = ALIAS[slug(bt)] || slug(bt); if (BO_BAI.test(id)) return null;
@@ -1129,6 +1129,8 @@ function jsonp(url, ms){
   });
 }
 const isMT = n => fold(n || '').includes('my tam');
+/* Bản ghi Apple Music của ĐÚNG Mỹ Tâm: có ca sĩ khác cũng tên «Mỹ Tâm» (khác mã nghệ sĩ) → loại; bài song ca (tên ghép) vẫn giữ */
+const laMT = r => isMT(r.artistName) && !(r.artistId && +r.artistId !== ITUNES_ARTIST_ID && fold(r.artistName).trim() === fold(ARTIST));
 const big = u => okUrl(u) ? u.replace(/\/\d+x\d+bb\./, '/600x600bb.') : '';
 function kindOf(name, count){
   if (/\s-\s+single$/i.test(name)) return 'single';
@@ -1137,19 +1139,19 @@ function kindOf(name, count){
 }
 async function syncItunes(force){
   let c = load('mt_it', null);
-  if (!force && c && c.v === 3 && Date.now() - c.at < 7 * 864e5) { applyItunes(c); return; }
+  if (!force && c && c.v === 4 && Date.now() - c.at < 7 * 864e5) { applyItunes(c); return; }
   try {
     const base = 'https://itunes.apple.com/lookup?id=' + ITUNES_ARTIST_ID + '&country=vn&limit=200';
     const [al, so] = await Promise.all([jsonp(base + '&entity=album'), jsonp(base + '&entity=song')]);
-    c = { v: 3, at: Date.now(), albums: [], songs: [] };
-    for (const r of (al.results || [])) if (r.wrapperType === 'collection' && isMT(r.artistName))
+    c = { v: 4, at: Date.now(), albums: [], songs: [] };
+    for (const r of (al.results || [])) if (r.wrapperType === 'collection' && laMT(r))
       c.albums.push({ n: r.collectionName, y: +(r.releaseDate || '').slice(0, 4) || 0, k: kindOf(r.collectionName, r.trackCount), art: big(r.artworkUrl100) });
     const ids = (al.results || []).filter(r => r.wrapperType === 'collection' && r.collectionId).map(r => r.collectionId), them = [];
     for (let i = 0; i < ids.length; i += 12) {                          // từng nhóm 12 album; nhóm lỗi thì bỏ qua
       try { const d = await jsonp('https://itunes.apple.com/lookup?id=' + ids.slice(i, i + 12).join(',') + '&entity=song&country=vn&limit=200'); them.push(...(d.results || [])); } catch (e) {}
     }
     const daCo = new Set();
-    for (const r of [...(so.results || []), ...them]) if (r.wrapperType === 'track' && r.kind === 'song' && isMT(r.artistName) && !daCo.has(r.trackId || r.trackName + '|' + r.collectionName) && daCo.add(r.trackId || r.trackName + '|' + r.collectionName))
+    for (const r of [...(so.results || []), ...them]) if (r.wrapperType === 'track' && r.kind === 'song' && laMT(r) && !daCo.has(r.trackId || r.trackName + '|' + r.collectionName) && daCo.add(r.trackId || r.trackName + '|' + r.collectionName))
       c.songs.push({ t: r.trackName, a: r.collectionName, y: +(r.releaseDate || '').slice(0, 4) || 0, art: big(r.artworkUrl100), pv: okUrl(r.previewUrl) ? r.previewUrl : '', lk: okUrl(r.trackViewUrl) ? r.trackViewUrl : '' });
     if (c.songs.length || c.albums.length) { save('mt_it', c); applyItunes(c); renderAll(); }
   } catch (e) { /* ngoại tuyến → dùng danh sách gốc */ }
