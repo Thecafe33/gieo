@@ -340,9 +340,33 @@ body.night::after{content:"";position:fixed;left:0;right:0;bottom:0;height:46vh;
 .sw input::after{content:"";position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#fff;transition:transform .25s var(--ease)}
 .sw input:checked{background:var(--rose)}
 .sw input:checked::after{transform:translateX(16px)}
-.gm-hd{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:10px;flex-wrap:wrap}
+.gm-hd{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:10px;flex-wrap:nowrap}
+.gm-hd>.cap{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gm-play.sieu .gm-sc small{display:none}
 .gm-hd .cap b{color:var(--tx);font-weight:600}
-.gm-sc{font-family:var(--disp);font-weight:300;font-size:30px;font-feature-settings:"lnum","tnum"}
+.gm-sc{display:inline-flex;align-items:center;font-family:var(--disp);font-weight:300;font-size:30px;font-feature-settings:"lnum","tnum"}
+/* Tem Siêu Tri Âm khi đang chơi: đầy dần theo câu đúng, đủ trên 90% thì mọc cánh */
+.gm-tem{position:relative;width:38px;height:35px;margin-right:14px;transition:margin .6s var(--spring)}
+.gm-tem[hidden]{display:none}
+.gm-tem svg{width:100%;height:100%;overflow:visible;display:block}
+.gt-nen{fill:rgba(255,255,255,.06)}
+.gt-vien{fill:none;stroke:#ff8db6;stroke-width:4}
+#gt-day{transform:translateY(92px);transition:transform .8s cubic-bezier(.3,1.4,.5,1)}
+.gm-tem.pop{animation:temPop .5s var(--spring)}
+@keyframes temPop{40%{transform:scale(1.28)}}
+.gt-canh path{fill:#fff;stroke:#dfe4f4;stroke-width:1.2}
+.gt-canh .gt-lo{fill:none;stroke:#cfd6ec;stroke-width:1.4;stroke-linecap:round}
+.gt-canh{opacity:0;transform-box:fill-box;transform:scale(.1);transition:opacity .4s,transform .7s var(--spring)}
+.gt-l{transform-origin:100% 75%}.gt-r{transform-origin:0% 75%}
+.gm-tem.xong{margin:0 22px 0 20px}
+.gm-tem.xong .gt-canh{opacity:1;transform:none}
+.gm-tem.xong .gt-l{animation:voL 1.5s ease-in-out .7s infinite}
+.gm-tem.xong .gt-r{animation:voR 1.5s ease-in-out .7s infinite}
+@keyframes voL{0%,100%{transform:rotate(0)}50%{transform:rotate(14deg)}}
+@keyframes voR{0%,100%{transform:rotate(0)}50%{transform:rotate(-14deg)}}
+.gm-tem.xong svg{filter:drop-shadow(0 0 8px rgba(255,150,195,.85))}
+.bui{position:fixed;left:0;top:0;border-radius:50%;pointer-events:none;z-index:70;background:radial-gradient(circle,#fff 0,#ffd3e4 35%,#ff5f9b 68%,transparent 72%);box-shadow:0 0 10px 3px rgba(255,95,155,.65)}
+@media(prefers-reduced-motion:reduce){.gm-tem.xong .gt-canh{animation:none}}
 .gm-sc small{font-family:var(--sans);font-size:10px;letter-spacing:.24em;color:var(--tx3);margin-right:8px;text-transform:uppercase}
 .gm-sub{display:flex;justify-content:flex-end;margin:0 0 10px}
 .gm-time{height:3px;background:var(--line2);border-radius:3px;overflow:hidden;margin-bottom:16px}
@@ -394,6 +418,7 @@ body.night::after{content:"";position:fixed;left:0;right:0;bottom:0;height:46vh;
 .gm-kq #gm-tiep:disabled{opacity:.25;pointer-events:none}
 /* Huy hiệu (gói Fan / Tri âm) */
 .hh{display:flex;flex-direction:column;align-items:center;text-align:center;margin:0 0 30px}
+.hh-stk.rong{width:min(440px,94vw);aspect-ratio:1.46}
 .hh-stk{position:relative;width:min(300px,78vw);aspect-ratio:1;touch-action:pan-y;margin-bottom:6px}
 .hh-stk canvas{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:grab}
 .hh-stk img{position:absolute;left:6%;top:6%;width:88%;height:88%;object-fit:contain;filter:drop-shadow(0 16px 22px rgba(0,0,0,.55));transition:opacity .5s}
@@ -404,6 +429,7 @@ body.night::after{content:"";position:fixed;left:0;right:0;bottom:0;height:46vh;
 .hh-chua b{color:var(--tx2)}
 .gm-hh{display:flex;gap:10px;margin:0 0 28px;align-items:center}
 .gm-hh .o{width:64px;height:64px;flex:none;background:center/contain no-repeat;filter:drop-shadow(0 8px 12px rgba(0,0,0,.6))}
+.gm-hh .o.rong{width:94px}
 .gm-hh .o.chua{color:transparent;filter:none;opacity:.5}
 .gm-hh .o.chua svg{width:100%;height:100%;overflow:visible}
 .gm-hh .o.chua svg path{stroke:var(--tx3);stroke-width:2;stroke-dasharray:4 4}
@@ -780,7 +806,7 @@ mark{background:none;color:var(--rose);font-style:italic}
         </div>
       </div>
       <div class="gm-play" id="gm-play" hidden>
-        <div class="gm-hd"><span class="cap">Câu <b id="gm-n">1</b> / <b id="gm-tong">10</b> · chuỗi <b id="gm-streak">0</b></span><span class="gm-sc"><small>Điểm</small><span id="gm-score">0</span></span></div>
+        <div class="gm-hd"><span class="cap">Câu <b id="gm-n">1</b> / <b id="gm-tong">10</b> · chuỗi <b id="gm-streak">0</b></span><span class="gm-sc"><span class="gm-tem" id="gm-tem" hidden title="Tem Siêu Tri Âm"><svg viewBox="0 0 100 92" aria-hidden="true"><defs><clipPath id="gt-clip"><path d="M50 89C22 68 2 52 2 29 2 13 14 2 28 2c10 0 18 6 22 14 4-8 12-14 22-14 14 0 26 11 26 27 0 23-20 39-48 60z"/></clipPath><linearGradient id="gt-g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffc2da"/><stop offset="1" stop-color="#ff3d84"/></linearGradient></defs><g class="gt-canh gt-l"><path d="M12 38C2 20-16 6-50 2c5 6 6 9 1 12 7 3 8 6 3 10 7 2 8 5 3 9 6 2 7 5 2 8C-14 46 0 50 12 48Z"/><path class="gt-lo" d="M8 40C-6 30-20 22-40 14M8 42C-8 36-20 32-36 28M8 44C-6 42-16 40-30 40"/></g><g class="gt-canh gt-r"><g transform="matrix(-1 0 0 1 100 0)"><path d="M12 38C2 20-16 6-50 2c5 6 6 9 1 12 7 3 8 6 3 10 7 2 8 5 3 9 6 2 7 5 2 8C-14 46 0 50 12 48Z"/><path class="gt-lo" d="M8 40C-6 30-20 22-40 14M8 42C-8 36-20 32-36 28M8 44C-6 42-16 40-30 40"/></g></g><path class="gt-nen" d="M50 89C22 68 2 52 2 29 2 13 14 2 28 2c10 0 18 6 22 14 4-8 12-14 22-14 14 0 26 11 26 27 0 23-20 39-48 60z"/><g clip-path="url(#gt-clip)"><rect id="gt-day" x="0" y="0" width="100" height="92" fill="url(#gt-g)"/></g><path class="gt-vien" d="M50 89C22 68 2 52 2 29 2 13 14 2 28 2c10 0 18 6 22 14 4-8 12-14 22-14 14 0 26 11 26 27 0 23-20 39-48 60z"/></svg></span><small>Điểm</small><span id="gm-score">0</span></span></div>
         <div class="gm-sub"><label class="sw"><input type="checkbox" id="gm-auto2">Tự chuyển câu</label></div>
         <div class="gm-time"><i id="gm-bar"></i></div>
         <audio id="gm-audio" preload="auto" hidden></audio>
@@ -1980,8 +2006,9 @@ async function hhFont(){ try { await Promise.race([Promise.all([document.fonts.l
 /* Huy hiệu trái tim kiểu Y2K: tim bóng kính + viền vinyl trắng + vệt chrome, một ngôi sao chrome lòi ra mép. Nền trong suốt = đường cắt miếng dán. */
 const HH_MAU = { fan: ['#3f68e6', '#2241b8', '#11236e'], triam: ['#cfa4ff', '#8d4dff', '#4a1aa6'], sieu: ['#ff8db6', '#ff3d84', '#a8104a'] };
 function veHuyHieu(k, r){
-  const g = GOI[k], M = HH_MAU[k], C = document.createElement('canvas'); C.width = C.height = 1024;
+  const g = GOI[k], M = HH_MAU[k], C = document.createElement('canvas'), canh = k === 'sieu'; C.width = canh ? 1500 : 1024; C.height = 1024;
   const x = C.getContext('2d'), cx = 512, s = 25, cy = 470;
+  if (canh) x.translate(238, 0);                                     // chừa chỗ hai bên cho đôi cánh
   const tim = () => { x.beginPath(); for (let i = 0; i <= 240; i++) { const t = i / 240 * Math.PI * 2;
     const X = 16 * Math.pow(Math.sin(t), 3), Y = 13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t);
     i ? x.lineTo(cx + X * s, cy - Y * s) : x.moveTo(cx + X * s, cy - Y * s); } x.closePath(); };
@@ -1989,6 +2016,15 @@ function veHuyHieu(k, r){
     x.quadraticCurveTo(sx - R * .12, sy + R * .12, sx - R, sy); x.quadraticCurveTo(sx - R * .12, sy - R * .12, sx, sy - R); x.closePath(); };
   const chrome = (y0, y1) => { const gr = x.createLinearGradient(0, y0, 0, y1); gr.addColorStop(0, '#ffffff'); gr.addColorStop(.45, '#c9d2e6'); gr.addColorStop(.55, '#8e9ab5'); gr.addColorStop(1, '#f4f7ff'); return gr; };
   x.lineJoin = 'round';
+  if (canh) [1, -1].forEach(sd => {                                   // đôi cánh trắng sau lưng tim
+    x.save(); x.translate(cx + sd * 360, 380); x.scale(sd, 1);
+    const w = new Path2D('M-40 50C40-30 140-160 262-176C240-136 226-116 262-98C222-74 210-58 246-36C200-16 190 2 222 24C172 40 152 52 172 74C108 86 40 82-40 50Z');
+    x.lineWidth = 40; x.strokeStyle = '#fff'; x.stroke(w); x.fillStyle = '#fff'; x.fill(w);
+    const gr = x.createLinearGradient(0, -170, 0, 80); gr.addColorStop(0, '#ffffff'); gr.addColorStop(1, '#e9edf9'); x.fillStyle = gr; x.fill(w);
+    x.strokeStyle = '#cfd6ec'; x.lineWidth = 7; x.lineCap = 'round';
+    [[30, 20, 150, -60, 236, -104], [30, 34, 150, -20, 222, -42], [30, 46, 140, 14, 198, 20], [20, 56, 100, 52, 150, 70]].forEach(([a, b, c, d, e, f]) => { x.beginPath(); x.moveTo(a, b); x.quadraticCurveTo(c, d, e, f); x.stroke(); });
+    x.restore();
+  });
   // viền vinyl trắng (tim + sao) → chính là đường cắt
   tim(); x.lineWidth = 60; x.strokeStyle = '#fff'; x.stroke(); x.fillStyle = '#fff'; x.fill();
   sao(842, 150, 92); x.lineWidth = 44; x.stroke(); x.fill();
@@ -2022,18 +2058,18 @@ function veHuyHieu(k, r){
   x.restore();
   try { x.letterSpacing = '0px'; } catch (e) {}
   const t = r.dung + '/' + r.tong + ' câu · ' + r.diem.toLocaleString('vi-VN') + ' điểm';
-  x.font = '600 30px "Be Vietnam Pro"'; const w = x.measureText(t).width + 56;
-  x.beginPath(); x.roundRect ? x.roundRect(cx - w / 2, sieu ? 640 : 608, w, 58, 29) : x.rect(cx - w / 2, sieu ? 640 : 608, w, 58);
+  x.font = '600 ' + (sieu ? 25 : 30) + 'px "Be Vietnam Pro"'; const w = x.measureText(t).width + (sieu ? 44 : 56);
+  x.beginPath(); x.roundRect ? x.roundRect(cx - w / 2, sieu ? 636 : 608, w, sieu ? 50 : 58, 29) : x.rect(cx - w / 2, sieu ? 636 : 608, w, sieu ? 50 : 58);
   x.fillStyle = 'rgba(255,255,255,.16)'; x.fill(); x.lineWidth = 2; x.strokeStyle = 'rgba(255,255,255,.55)'; x.stroke();
-  x.fillStyle = '#fff'; x.fillText(t, cx, sieu ? 670 : 638);
+  x.fillStyle = '#fff'; x.fillText(t, cx, sieu ? 662 : 638);
   return C;
 }
-function hhNho(C, n){ const c = document.createElement('canvas'); c.width = c.height = n; c.getContext('2d').drawImage(C, 0, 0, n, n); return c.toDataURL('image/png'); }
+function hhNho(C, n){ const c = document.createElement('canvas'); c.width = n; c.height = Math.round(n * C.height / C.width); c.getContext('2d').drawImage(C, 0, 0, c.width, c.height); return c.toDataURL('image/png'); }
 async function hhKhoGoc(){   // màn chọn gói: các huy hiệu đã có
   const all = hhAll(), box = $('#gm-hh'); if (!box) return;
   await hhFont();
   box.innerHTML = HH_GOI.map(k => { const r = all[k];
-    return r ? `<span class="o" style="background-image:url(${hhNho(veHuyHieu(k, r), 192)})" title="Huy hiệu ${GOI[k].ten}"></span>` : `<span class="o chua" title="Chưa có tem ${GOI[k].ten}">${TIM_SVG}</span>`; }).join('') +
+    return r ? `<span class="o${k === 'sieu' ? ' rong' : ''}" style="background-image:url(${hhNho(veHuyHieu(k, r), 192)})" title="Huy hiệu ${GOI[k].ten}"></span>` : `<span class="o chua" title="Chưa có tem ${GOI[k].ten}">${TIM_SVG}</span>`; }).join('') +
     `<small>${HH_GOI.filter(k => all[k]).length}/${HH_GOI.length} tem</small>`;
 }
 function hhHuy(){ if (GM.hh) { GM.hh.destroy(); GM.hh = null; } }
@@ -2067,6 +2103,7 @@ function gmStart(){
   const g = GOI[gmPref.goi];
   Object.assign(GM, { goi: gmPref.goi, g, giay: g.giay, n: 0, tong: g.n, score: 0, streak: 0, dung: 0, played: [], log: [] });
   $('#gm-tong').textContent = GM.tong;
+  $('#gm-play').classList.toggle('sieu', GM.goi === 'sieu'); $('#gm-tem').hidden = GM.goi !== 'sieu'; $('#gm-tem').classList.remove('xong'); gmTemCapNhat();
   $('#gm-start').hidden = true; $('#gm-end').hidden = true; $('#gm-play').hidden = false; gmSyncPref();
   gmNext();
 }
@@ -2122,6 +2159,7 @@ function gmAnswer(i){
     else b.classList.add('mo');
   });
   $('#gm-score').textContent = GM.score; $('#gm-streak').textContent = GM.streak;
+  if (ok && GM.goi === 'sieu') gmBui($$('#gm-opts button')[dungI]).then(() => { const t = $('#gm-tem'); gmTemCapNhat(); t.classList.remove('pop'); void t.offsetWidth; t.classList.add('pop'); });
   if (het) { $('#gm-v').classList.add('het'); gmCover('het', GM.song.title); } else gmCover('lo', GM.song.title);
   const x = GM.song, u = songArt(x);
   const th = $('#gm-kq-th'); th.className = 'thumb' + cvCls(u, x.id); th.style.backgroundImage = artCss(u, x.id); th.innerHTML = cvx({ l: false, i: x.title.charAt(0).toUpperCase() });
@@ -2141,6 +2179,34 @@ function gmAutoNext(){
   GM.auto = setTimeout(gmTiep, GM_CHO * 1000);
 }
 $('#gm-tiep').onclick = gmTiep;
+/* Gói Siêu Tri Âm: tem cạnh số điểm đầy dần (đủ khi đúng trên 90%) — câu đúng bắn bụi tiên hồng bay vào tem */
+function gmTemCapNhat(){
+  const can = hhCan(GOI.sieu), pct = Math.min(1, GM.dung / can), t = $('#gm-tem');
+  $('#gt-day').style.transform = `translateY(${(92 * (1 - pct)).toFixed(1)}px)`;
+  const xong = GM.dung >= can;
+  if (xong && !t.classList.contains('xong') && GM.n) toast('Tem Siêu Tri Âm đã mọc cánh!');
+  t.classList.toggle('xong', xong);
+}
+function gmBui(fromEl){
+  const tem = $('#gm-tem'); if (tem.hidden || !fromEl) return Promise.resolve();
+  const a = fromEl.getBoundingClientRect(), b = tem.getBoundingClientRect(), x1 = b.left + b.width / 2, y1 = b.top + b.height * 0.55, N = 12;
+  if (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) return Promise.resolve();
+  return new Promise(res => { let xong = 0;
+    for (let i = 0; i < N; i++) {
+      const d = document.createElement('i'), sz = 4 + Math.random() * 7; d.className = 'bui'; d.style.width = d.style.height = sz + 'px'; document.body.appendChild(d);
+      const x0 = a.left + a.width * (0.15 + Math.random() * 0.7) - sz / 2, y0 = a.top + a.height * (0.2 + Math.random() * 0.6) - sz / 2;
+      const mx = (x0 + x1) / 2 + (Math.random() - 0.5) * 180, my = Math.min(y0, y1) - 30 - Math.random() * 120;
+      const an = d.animate([
+        { transform: `translate(${x0}px,${y0}px) scale(.3)`, opacity: 0 },
+        { transform: `translate(${x0}px,${y0}px) scale(1)`, opacity: 1, offset: 0.08 },
+        { transform: `translate(${mx}px,${my}px) scale(1.25)`, opacity: 1, offset: 0.55 },
+        { transform: `translate(${x1 - sz / 2}px,${y1 - sz / 2}px) scale(.3)`, opacity: 0.25 }
+      ], { duration: 750 + Math.random() * 450, delay: i * 35, easing: 'cubic-bezier(.45,0,.3,1)', fill: 'forwards' });
+      const het = () => { d.remove(); if (++xong === N) res(); };
+      an.onfinish = het; an.oncancel = het;
+    }
+  });
+}
 /* Khung kết quả lúc đang nghe: giữ nguyên chỗ, nút Câu tiếp mờ cho tới khi trả lời */
 function gmKqCho(){
   $('#gm-kq').className = 'gm-kq cho';
@@ -2158,7 +2224,7 @@ function gmEnd(){
     if (GM.dung >= hhCan(GM.g)) {
       const all = hhAll(), cu = all[GM.goi]; hhMoi = { dung: GM.dung, tong: GM.tong, diem: GM.score, at: Date.now() };
       if (!cu || GM.score > cu.diem) { all[GM.goi] = hhMoi; save('mt_huy_hieu', all); }
-      hh = `<div class="hh"><div class="hh-stk" id="hh-stk"><img alt="Huy hiệu ${GM.g.ten}"><canvas></canvas></div>
+      hh = `<div class="hh"><div class="hh-stk${GM.goi === 'sieu' ? ' rong' : ''}" id="hh-stk"><img alt="Huy hiệu ${GM.g.ten}"><canvas></canvas></div>
         <span class="cap rose">${cu ? 'Bạn lại nhận' : 'Tem mới'}</span><h3>Tem ${GM.g.ten}</h3><p>Kéo để nghiêng · kéo từ mép để bóc thử</p>
         <button class="pillbtn" id="hh-luu">Lưu ảnh tem</button></div>`;
     } else hh = `<p class="hh-chua">Đúng ít nhất <b>${hhCan(GM.g)} / ${GM.tong}</b> câu để nhận tem ${GM.g.ten}</p>`;
