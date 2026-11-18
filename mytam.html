@@ -2,6 +2,10 @@
 <html lang="vi">
 <head>
 <meta charset="utf-8">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="Mỹ Tâm">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0a0a0b">
 <meta name="color-scheme" content="dark">
@@ -1217,7 +1221,7 @@ function goView(v){
   const cu = view; if (cu !== v) viewY[cu] = cuonY();
   view = v;
   for (const id of ['home','shuffle','albums','songs','game']) $('#v-' + id).hidden = id !== v;
-  if (v !== 'game') { gmPause(); gmDongGoi(); } else gmIntro();
+  if (v !== 'game') { gmPause(); gmDongGoi(); gmRaFull(); } else gmIntro();
   $$('.dock .tab').forEach(b => b.classList.toggle('on', b.dataset.den === v));
   document.body.classList.toggle('night', v === 'shuffle');
   document.querySelector('meta[name=theme-color]').content = '#0a0a0b';
@@ -2129,9 +2133,20 @@ function gmStopAuto(){ clearTimeout(GM.auto); clearInterval(GM.dem); GM.auto = 0
 function gmPause(){ gmStopAuto(); cancelAnimationFrame(GM.raf); try { gmAudio.pause(); } catch (e) {} }
 function gmShuffle(a){ for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
 $('#gm-go').onclick = gmStart;
+/* Chơi game: xin toàn màn hình (ẩn thanh địa chỉ) — phải gọi ngay trong cú bấm. iPhone (Safari) không hỗ trợ cho trang web → bỏ qua êm. */
+let gmFull = false;
+function gmVaoFull(){
+  const d = document, el = d.documentElement, rq = el.requestFullscreen || el.webkitRequestFullscreen;
+  if (!rq || d.fullscreenElement || d.webkitFullscreenElement) return;
+  try { const r = rq.call(el, { navigationUI: 'hide' }); gmFull = true; if (r && r.catch) r.catch(() => { gmFull = false; }); } catch (e) {}
+}
+function gmRaFull(){
+  const d = document; if (!gmFull) return; gmFull = false;
+  if (d.fullscreenElement || d.webkitFullscreenElement) { const ex = d.exitFullscreen || d.webkitExitFullscreen; try { const r = ex.call(d); if (r && r.catch) r.catch(() => {}); } catch (e) {} }
+}
 function gmStart(){
   const pool = gmPool(); if (pool.length < 4) { toast('Chưa tải được đoạn nghe thử — kiểm tra mạng rồi thử lại'); return; }
-  gmDongGoi(); hhHuy();
+  gmVaoFull(); gmDongGoi(); hhHuy();
   const g = GOI[gmPref.goi];
   Object.assign(GM, { goi: gmPref.goi, g, giay: g.giay, n: 0, tong: g.n, score: 0, streak: 0, dung: 0, played: [], log: [] });
   $('#gm-tong').textContent = GM.tong;
