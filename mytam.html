@@ -1050,9 +1050,20 @@ const S = {
 };
 const savePrefs = () => save('mt_prefs', S.prefs);
 
+/* Album phòng thu đánh số «Vol.»: danh sách gốc ghi tên tiếng Việt (vd «Tâm»), Apple Music ghi «Tâm, Vol. 8»
+   → gộp làm một, giữ tên có số Vol của Apple Music. */
+const VOL_GOC = { 'mai-yeu': 1, 'dau-chi-rieng-em': 2, 'ngay-ay-bay-gio': 3, 'hoang-hon-thuc-giac': 4, 'vut-bay': 5, 'tro-lai': 6, 'nhip-dap': 7, 'tam': 8, 'tam-9': 9 };
 function addAlbum(title, year, kind, art){
   const t = nfc(title).replace(/\s+-\s+(single|ep)$/i, '').trim();
-  const id = slug(t);
+  let id = slug(t);
+  const vm = !S.albums.has(id) && t.match(/\bvol\.?\s*(\d+)/i);
+  if (vm) {
+    const n = +vm[1], base = slug(t.replace(/[\s,(\-–—]*\bvol\.?\s*\d+\)?/i, ''));
+    let goc = [...S.albums.keys()].find(k => k === base + '-' + n || k.startsWith(base + '-' + n + '-'));   // «Những giai điệu…, Vol. 1» ↔ «Những giai điệu… 1»
+    if (!goc && !/giai-dieu|live|concert|tuyen|best|hits|collection|tinh-ca|remix|karaoke/.test(base))   // album phòng thu đánh số
+      goc = Object.keys(VOL_GOC).find(k => VOL_GOC[k] === n && S.albums.has(k));
+    if (goc) { id = goc; S.albums.get(goc).title = t; }
+  }
   let a = S.albums.get(id);
   if (!a) { a = { id, title: t, year: year || 0, kind: kind || 'album', art: '', songs: [] }; S.albums.set(id, a); }
   if (!a.year && year) a.year = year;
