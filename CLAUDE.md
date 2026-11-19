@@ -47,7 +47,7 @@
 ## Kế hoạch & tài liệu
 - **Đọc trước tiên: `docs/TRANG_THAI.md`** (bản hiện hành, việc còn mở, bản đồ tài liệu).
 - **Gói chờ deploy (16/11)**: `giao_file/dot_16-11_GOP_v22_gaunoel_quanly/` gồm 2 đợt CHƯA deploy (Gấu Noel v4, quanlygieo gộp) + file Hosting đợt 12/11 đã deploy (chép đè lại vô hại, JS giống hệt) — CHỈ Hosting, chủ dự án deploy một lượt. Sửa file thuộc gói → dựng lại gói gộp từ `ban_deploy/giangsinh/`.
-- **Gợi ý đặt hàng quanlygieo** (19/11, chưa deploy — gói `giao_file/dot_19-11_goi_y_dat_hang/`): widget `[GỢI-Ý-ĐẶT]` (`gyd*`, `<style id="ql-goi-y-dat">`) ở Kho ▸ Đặt hàng; đặt ngày nào hàng về ngày đó; chi tiết `docs/TRANG_THAI.md` mục 19/11.
+- **Gợi ý đặt hàng quanlygieo** (19/11, CHƯA deploy — chủ dự án xác nhận 19/11; gói chờ deploy `giao_file/dot_19-11_goi_y_dat_hang/`, sửa quanlygieo trước khi deploy → dựng lại gói từ `ban_deploy/giangsinh/`): widget `[GỢI-Ý-ĐẶT]` (`gyd*`, `<style id="ql-goi-y-dat">`) ở Kho ▸ Đặt hàng; đặt ngày nào hàng về ngày đó; chi tiết `docs/TRANG_THAI.md` mục 19/11.
 - Tách posgieo thành `js/posgieo/*.vN.js`: `docs/KE_HOACH_TACH_POSGIEO_DA_CUA_HANG.md` — chỉ chuyển nguyên văn, ưu tiên luồng bán trơn tru.
 - Bản theo mùa: Giáng sinh đang chạy; Tết 2027 (`docs/LIXI_TET_2027.md`). Gấu Noel `gau_noel_giangsinh.v5.js` (19/11, CHƯA deploy — v4 đã deploy; v5 = v4 + phần ngẫu nhiên cố định 40%; gói `giao_file/dot_19-11_gau_noel_v5/`; còn sửa tại chỗ được, sau deploy = v6; luật + hướng dẫn gỡ: `docs/HUONG_DAN_GAU_NOEL.md`). Chế độ thử `docs/CHE_DO_THU.md` — app thật không bao giờ nạp `che_do_thu`.
 - Giao diện quanlygieo: dáng theo manage, **giữ màu hồng `#E23A5D`** (`docs/GIAO_DIEN_QUANLY.md`).

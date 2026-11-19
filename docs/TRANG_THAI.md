@@ -1,4 +1,4 @@
-# 19/11 — quanlygieo: GỢI Ý ĐẶT HÀNG (Kho ▸ Đặt hàng) — chủ dự án duyệt mẫu v5 — CHƯA deploy
+# 19/11 — quanlygieo: GỢI Ý ĐẶT HÀNG (Kho ▸ Đặt hàng) — chủ dự án duyệt mẫu v5 — CHƯA deploy (chủ dự án xác nhận 19/11)
 
 - Một widget `[GỢI-Ý-ĐẶT]` đầu tab Kho ▸ Đặt hàng ▸ Đơn đặt hàng, chỉ hai nhóm **Cần mua** / **Đủ, không cần mua**; nút **Đơn thứ Hai** (đặt mỗi thứ Hai, đủ dùng thứ Hai → hết Chủ nhật) / **Đặt lẻ hôm nay** (món không đủ dùng tới thứ Hai; thứ Hai chỉ có đơn tuần). Mẫu duyệt `docs/mau/mau_goi_y_dat_hang_v5.html` (v1–v4 = các vòng góp ý).
 - Chủ dự án chốt: **đặt ngày nào hàng về ngày đó**; không chia theo nhà cung cấp; dự trữ dựa trên Engine 2.
@@ -348,6 +348,7 @@ Chủ quán chốt hướng lõi điều hành mới `unit_engine2_v1.js`: sự 
 
 | Việc | Ghi chú |
 |---|---|
+| **Gợi ý đặt hàng quanlygieo — CHƯA deploy (chủ dự án xác nhận 19/11)** | Gói `giao_file/dot_19-11_goi_y_dat_hang/` (quanlygieo.html + quanlygieo_thu.html bản Giáng sinh, chỉ Hosting, chỉ thêm so với gói 16/11). Sửa tiếp quanlygieo trước khi deploy → dựng lại gói này từ `ban_deploy/giangsinh/`. Chi tiết: mục 19/11 đầu file |
 | Màn **Doanh thu** của POS vẫn hiện số tiền | Chủ quán chưa quyết có ẩn không (pill target chỉ hiện %) |
 | **Tối ưu lượt đọc T0 → T6** (vượt 50K lượt đọc ngày 04/10) | `docs/KE_HOACH_TOI_UU_DOC.md` — ưu tiên hơn đa cửa hàng. T0: 4/6 index đã có từ trước (không phải nguyên nhân), còn 2 index `_histLoad`. T1: công cụ `tools/dem_luot_doc.js` + **bản đo** `posgieo_dem.html` / `quanlygieo_dem.html` (sinh bằng `tools/tao_ban_dem.js`, dữ liệu thật, nút 📊) — đã đo 05/10 (QL 22.880 lượt/13 phút, 83% sổ gốc; POS ~990 lượt `customers` mỗi lần mở app). **T3 + T2 đã làm 05/10 (chưa deploy)** — xem mục T2/T3 của kế hoạch. Bản đo đã gỡ khỏi repo — xoá `*_dem.html`, `dem_luot_doc.v1.js` khỏi thư mục deploy |
 | **Đa cửa hàng Bước 1 — ĐÃ LÀM 05/10 (chưa deploy)** | `data_access.v1.js` + `tools/check_paths.js` + test `da_cua_hang_b1`; quán hiện tại giữ nguyên mọi đường dẫn. Deploy cùng T2/T3 được (đều không đổi hành vi). |
