@@ -1,4 +1,5 @@
-/* gau_noel_giangsinh.v4.js — Quay trúng gấu Giáng sinh 2026 (v4: phát theo doanh thu, nhận tiếp số liệu v3).
+/* gau_noel_giangsinh.v5.js — Quay trúng gấu Giáng sinh 2026 (v4: phát theo doanh thu, nhận tiếp số liệu v3;
+ *   v5: phần ngẫu nhiên CỐ ĐỊNH 40% tỉ lệ gấu / lãi — chắc trúng dùng phần còn lại).
  * Tài liệu, luật chơi và hướng dẫn gỡ chương trình: docs/HUONG_DAN_GAU_NOEL.md (không nằm trong bộ deploy).
  */
 (function (root) {
@@ -31,7 +32,8 @@
     phanNoel: 0.20,                  // phần kho dành cho 23–25/12
     noelChia: 5,                     // 23–25/12: cứ 5 bill ≥ 4 ly chắc trúng thì 1 bill nhường gấu cho bill 2 ly
     rhoBuoc: 0.15,                   // tỉ lệ gấu / lãi đổi tối đa ±15% mỗi ngày
-    rhoSan: 0.2,                     // phần ngẫu nhiên tối thiểu = 20% tỉ lệ (gấu chắc trúng không ăn hết)
+    rhoSan: 0.2,                     // (v4 — v5 không dùng) phần ngẫu nhiên tối thiểu = 20% tỉ lệ
+    phanRand: 0.4,                   // [v5 19/11 chủ dự án] phần ngẫu nhiên CỐ ĐỊNH = 40% tỉ lệ gấu / lãi; chắc trúng (ống, 6 ly, bed, nhịp) ~60%
     nhip: { xofa: 5, gg01: 4 },      // nhịp đông khách: N bill trong 10 phút, N−1 bill trước đều trượt → bill thứ N quay tại quán chắc trúng
     nhipPhut: 10,
     x2Thieu: 3,                      // tuần trước phát thiếu dự kiến ≥ 3 gấu → T2 & T4 tuần này tỉ lệ ×2
@@ -237,7 +239,7 @@
     if (bed && !L) L = 1;
     if (!L) return out;
     var lai = c.lai, chacLy = ly >= (noel ? CFG.lyChacNoel : CFG.lyChac), wins = 0;
-    var rRand = Math.max(h.rho * CFG.rhoSan, h.rho * (1 - (Number(v.gEst) || 0)));
+    var rRand = h.rho * CFG.phanRand;   // [v5] v4: max(20%, 1 − gEst) × tỉ lệ → tụt còn 20% khi chắc trúng nhiều
     var lay = function () { if (noel) { if (v.noel <= 0) return false; v.noel--; } else { if (v.thuong <= 0) return false; v.thuong--; } return true; };
     for (var l = 0; l < L; l++) {
       var du = h.rho * lai / CFG.giaGau;
