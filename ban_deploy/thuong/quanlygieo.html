@@ -2367,6 +2367,24 @@ html.tab-ui .topbar.has-notifications .topbar-actions{flex:0 0 auto;max-width:ca
 .ax-tag{flex:none;padding:4px 11px;border-radius:50px;font-size:11.5px;font-weight:800;color:var(--ink-2,#6b6470);background:rgba(0,0,0,.06)}.ax-tag.ok{color:var(--ok,#1c8f55);background:rgba(28,143,85,.12)}
 @media(max-width:640px){.ax-grid{grid-template-columns:1fr}.ax-sec{padding:16px 14px 6px}}
 </style>
+<!-- [GỢI-Ý-ĐẶT] Widget gợi ý đặt hàng (Kho ▸ Đặt hàng) — dùng khung .wdg sẵn có, chỉ thêm hàng / nhóm. -->
+<style id="ql-goi-y-dat">
+.gyd .wdg-head{flex-wrap:wrap;}
+.gyd-seg{display:inline-flex;flex:none;background:rgba(255,255,255,.7);border-radius:99px;padding:3px;}
+.gyd-seg button{border:0;background:transparent;padding:7px 13px;border-radius:99px;font:inherit;font-size:12.5px;font-weight:650;color:var(--gt);cursor:pointer;white-space:nowrap;}
+.gyd-seg button.on{background:#fff;color:var(--gm);font-weight:800;box-shadow:0 1px 3px rgba(0,0,0,.1);}
+.gyd-grp{font-size:13px;font-weight:800;margin:14px 4px 7px;}
+.gyd-grp:first-child{margin-top:0;}
+.gyd-grp.buy{color:var(--gm);} .gyd-grp.ok{color:var(--ok);}
+.gyd-grp small{font-size:12px;font-weight:700;opacity:.7;margin-left:6px;}
+.gyd-row{display:flex;align-items:center;gap:12px;background:rgba(255,255,255,.72);border-radius:18px;padding:9px 14px 9px 10px;margin-bottom:7px;}
+.gyd-mk{display:grid;place-items:center;width:34px;height:34px;flex:none;border-radius:12px;background:var(--mc);color:#fff;font-size:12.5px;font-weight:850;}
+.gyd-nm{flex:1;min-width:0;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.gyd-q{font-size:16px;font-weight:850;color:var(--mc);white-space:nowrap;}
+.gyd-du{opacity:.72;} .gyd-du .gyd-q{color:var(--ok);font-size:14px;}
+.gyd-foot{display:flex;justify-content:flex-end;gap:8px;margin-top:12px;padding-top:12px;border-top:1px solid color-mix(in srgb,var(--wc) 16%,transparent);}
+@media (max-width:760px){ .gyd-seg{width:100%;} .gyd-seg button{flex:1;} .gyd-foot .btn{flex:1;} }
+</style>
 </head>
 <body>
 
@@ -27732,6 +27750,7 @@ async function renderKhoPO(){
         <div class="nl-title">Đơn đặt hàng <span class="nl-pill">${pos.length}</span></div>
         <button class="btn nl-add" onclick="poOpenDraft()">+ Đơn đặt hàng mới</button>
       </div>
+      ${QL_VIEW !== 'all' ? '<section class="wdg wdg-pink gyd" id="gydBox"></section>' : ''}
       ${sorted.length ? `<div class="nl-grid btp po">${sorted.map(poCardHtml).join('')}</div>` : '<div class="k2-empty">Chưa có đơn đặt hàng nào.</div>'}`;
   } else if(poTab === 'rec'){
     const p2 = n => String(n).padStart(2,'0');
@@ -27765,9 +27784,189 @@ async function renderKhoPO(){
   }
   box.innerHTML = tabBar + body;
   if(poTab === 'quick') renderKhoStockin();
+  if(poTab === 'po') gydMount(pos);
 }
 // [PO-UI] Tab đang xem trong Đặt & nhận hàng: 'po' | 'rec' | 'quick'.
 let poTab = 'po';
+
+// ============================================================
+// [GỢI-Ý-ĐẶT] Gợi ý đặt hàng — chủ dự án duyệt mẫu v5 19/11 (docs/mau/mau_goi_y_dat_hang_v5.html).
+// MỘT widget đầu tab Kho ▸ Đặt hàng, chỉ hai nhóm «Cần mua» / «Đủ, không cần mua»:
+//   · Đơn thứ Hai — đơn tuần đặt mỗi thứ Hai, phải đủ dùng từ thứ Hai tới hết Chủ nhật;
+//   · Đặt lẻ hôm nay — món không đủ dùng tới thứ Hai (tuyến đặt lẻ).
+// Chủ dự án chốt: ĐẶT NGÀY NÀO HÀNG VỀ NGÀY ĐÓ (không cộng ngày giao).
+// Lượng dùng: sổ kho 28 ngày qua bản tổng hợp sẵn có (_ledgerRangeRows) = bán + nấu BTP (CONSUMPTION)
+//   + hao hụt ghi sổ (WASTE); trung bình THEO TỪNG THỨ, chỉ tính ngày có dùng; hôm nay = trung bình thứ
+//   hôm nay − phần đã dùng (sổ hôm nay).
+// Dự trữ: hao hụt ngoài sổ của Engine 2 (models/current, mức cao 90%) + dao động bán (mức cao 90%);
+//   đơn tuần không thấp hơn «tồn tối thiểu» đang khai. Engine 2 chưa có mô hình → phần hao hụt = 0.
+// Có = tồn hiện tại (tem = sự thật) + phần còn chờ nhận của đơn đặt hàng chưa nhận đủ.
+// Làm tròn LÊN theo đơn vị của lần đặt gần nhất món đó; chưa đặt lần nào → đơn vị đếm kho; không có → đơn vị gốc.
+// CHỈ ĐỌC — không ghi gì. «Tạo đơn» chỉ điền sẵn form đơn đặt hàng cũ (poDraftLines → poOpenDraft).
+// ============================================================
+const GYD = { soNgay: 28, z90: 1.2816, thuDat: 1, songMs: 5 * 60 * 1000 };
+let gydMode = 'week', gydCache = null, gydDangNap = null;   // gydCache = { store, at, todayKey, kq }
+
+// Hàm thuần (test: tests/goi_y_dat_hang.test.js).
+// inp = { items:[{id,name,unit,stock,min}], days:[{key,dow,q:{itemId:lượng}}], todayKey, todayDow,
+//         incoming:{itemId:lượng}, e2:{itemId:{estimate,high}}, pack:{itemId:{factor,name}} }
+function gydTinh(inp){
+  const ngayMo = (inp.days||[]).filter(d => d.key !== inp.todayKey && Object.values(d.q||{}).some(v => Number(v) > 0));
+  const homNay = (inp.days||[]).find(d => d.key === inp.todayKey) || { q: {} };
+  const toiThu2 = (GYD.thuDat - inp.todayDow + 7) % 7;      // 0 = hôm nay là thứ Hai
+  const kq = { toiThu2, week: { can: [], du: [] }, day: { can: [], du: [] } };
+  (inp.items||[]).forEach(it => {
+    const lay = d => Math.max(0, Number((d.q||{})[it.id]) || 0);
+    const theoThu = Array.from({ length: 7 }, () => []);
+    ngayMo.forEach(d => theoThu[d.dow].push(lay(d)));
+    const tatCa = ngayMo.map(lay);
+    const tb = tatCa.length ? tatCa.reduce((s, x) => s + x, 0) / tatCa.length : 0;
+    const tbThu = theoThu.map(a => a.length ? a.reduce((s, x) => s + x, 0) / a.length : tb);   // thứ chưa có ngày mở → trung bình chung
+    const min = Math.max(0, Number(it.min) || 0);
+    if(!(tb > 0) && !(min > 0)) return;                      // không dùng trong 28 ngày, không khai tồn tối thiểu → bỏ qua
+    let ss = 0; ngayMo.forEach(d => { ss += (lay(d) - tbThu[d.dow]) ** 2; });
+    const sd = ngayMo.length > 1 ? Math.sqrt(ss / (ngayMo.length - 1)) : 0;
+    const e = (inp.e2 || {})[it.id] || {};
+    const est = Math.max(0, Number(e.estimate) || 0), high = Math.max(est, Number(e.high) || 0);
+    const thu = k => tbThu[(inp.todayDow + k) % 7];
+    const cong = (a, b) => { let s = 0; for(let k = a; k <= b; k++) s += thu(k); return s; };
+    const conHomNay = Math.max(0, thu(0) - lay(homNay));
+    const phanHomNay = thu(0) > 0 ? conHomNay / thu(0) : 0;
+    const co = Math.max(0, Number(it.stock) || 0) + Math.max(0, Number((inp.incoming || {})[it.id]) || 0);
+    const pk = (inp.pack || {})[it.id] || { factor: 1, name: it.unit || '' };
+    const f = Number(pk.factor) > 0 ? Number(pk.factor) : 1;
+    const lamTron = base => base > 1e-9 ? Math.ceil(base / f - 1e-9) : 0;
+    const dong = n => ({ id: it.id, name: it.name || '', packs: n, packName: pk.name || it.unit || '', factor: f });
+    // Đơn thứ Hai: dùng tới lúc đặt (hôm nay → hết Chủ nhật trước đó), rồi phải đủ thứ Hai → Chủ nhật.
+    const truoc = toiThu2 === 0 ? 0 : conHomNay + cong(1, toiThu2 - 1);
+    const chuKy = toiThu2 === 0 ? conHomNay + cong(1, 6) : cong(toiThu2, toiThu2 + 6);
+    const ngayChuKy = toiThu2 === 0 ? 6 + phanHomNay : 7;
+    const conLucDat = Math.max(0, co - truoc * (1 + est));
+    const duTru = Math.max(high * chuKy + GYD.z90 * sd * Math.sqrt(ngayChuKy), min);
+    const tuan = lamTron(chuKy * (1 + est) + duTru - conLucDat);
+    (tuan > 0 ? kq.week.can : kq.week.du).push(dong(tuan));
+    // Đặt lẻ hôm nay (thứ Hai thì chính là ngày đặt đơn tuần → không tính).
+    if(toiThu2 > 0){
+      const ngayLe = toiThu2 - 1 + phanHomNay;
+      const thieu = truoc * (1 + est) + high * truoc + GYD.z90 * sd * Math.sqrt(Math.max(0, ngayLe)) - co;
+      const le = thieu > 1e-9 ? lamTron(thieu) : 0;
+      (le > 0 ? kq.day.can : kq.day.du).push(dong(le));
+    }
+  });
+  const xep = a => a.sort((x, y) => String(x.name).localeCompare(String(y.name), 'vi'));
+  [kq.week.can, kq.week.du, kq.day.can, kq.day.du].forEach(xep);
+  return kq;
+}
+
+// Đọc dữ liệu (chỉ đọc). pos = danh sách đơn renderKhoPO vừa tải (mới nhất trước).
+async function gydNap(pos){
+  const todayKey = dkey(vnDate()), start = _dayShift(todayKey, -GYD.soNgay);
+  const [L, e2Snap] = await Promise.all([
+    _ledgerRangeRows(start, todayKey),
+    fstore.collection('duty_digests_gieogieo').doc('_engine2').collection('models').doc('current').get()
+      .catch(err => { console.warn('[Gợi ý đặt] chưa đọc được mô hình Engine 2 — dự trữ không có phần hao hụt', err); return null; })
+  ]);
+  const theoNgay = {};
+  const cong = (k, id, q) => { if(!k || !id || !q) return; const d = theoNgay[k] || (theoNgay[k] = {}); d[id] = (d[id] || 0) + q; };
+  (L.plain || []).forEach(x => cong(x.date, x.i, Number(x.q) || 0));
+  (L.stock || []).forEach(t => {
+    if(t.type === 'WASTE') return cong(t.businessDate, t.itemId, Math.abs(Number(t.qty) || 0));
+    const dung = txConsumedQty(t);
+    if(dung !== null) cong(t.businessDate, t.itemId, dung);
+  });
+  const days = [];
+  for(let k = start; k <= todayKey; k = _dayShift(k, 1)) days.push({ key: k, dow: vnDate(k + 'T00:00:00').getDay(), q: theoNgay[k] || {} });
+  const items = (INVENTORY_ITEMS || []).filter(it => it.active !== false && itemStockManaged(it))
+    .map(it => ({ id: it.id, name: it.name || '', unit: it.unit || '', stock: Number(it.currentStock) || 0, min: Number(it.minStock) || 0 }));
+  const incoming = {}, pack = {};
+  (pos || []).forEach(po => {
+    const treo = po.status === 'pending' || po.status === 'partial';
+    (po.lines || []).forEach(l => {
+      if(!l.itemId) return;
+      if(treo) incoming[l.itemId] = (incoming[l.itemId] || 0) + Math.max(0, (Number(l.qtyExpectedBase) || 0) - (Number(l.receivedGoodBase) || 0));
+      if(pack[l.itemId] || po.status === 'cancelled') return;
+      const it = INVENTORY_ITEMS.find(x => x.id === l.itemId), f = Number(l.orderUnitFactor) || 0;
+      // Chỉ nhận đơn vị còn trong danh sách quy cách của món — form đơn đặt hàng chỉ chọn được các đơn vị đó.
+      if(it && (f === 1 || (it.packagingUnits || []).some(p => Number(p.baseQty) === f))) pack[l.itemId] = { factor: f, name: poUnitLabelFor(it, f) };
+    });
+  });
+  (INVENTORY_ITEMS || []).forEach(it => {
+    if(pack[it.id]) return;
+    const dem = (it.packagingUnits || []).find(p => p.name === it.countUnitName && Number(p.baseQty) > 1);
+    pack[it.id] = dem ? { factor: Number(dem.baseQty), name: dem.name } : { factor: 1, name: it.unit || '' };
+  });
+  const e2 = e2Snap && e2Snap.exists ? ((e2Snap.data() || {}).items || {}) : {};
+  return { items, days, todayKey, todayDow: vnDate().getDay(), incoming, e2, pack };
+}
+
+async function gydMount(pos){
+  const store = GieoData.storeId();
+  if(!gydCache || gydCache.store !== store || gydCache.todayKey !== dkey(vnDate()) || Date.now() - gydCache.at > GYD.songMs){
+    const box = document.getElementById('gydBox');
+    if(!box) return;
+    box.innerHTML = `<div class="wdg-head">${wdgHeadHTML('package', 'Gợi ý đặt hàng', 'Đang tính…')}</div>`;
+    try{
+      // Tab vẽ lại khi đang tính (bấm qua lại) → dùng chung một lượt đọc, không đọc lại.
+      if(!gydDangNap || gydDangNap.store !== store) gydDangNap = { store, p: gydNap(pos).finally(() => { gydDangNap = null; }) };
+      const inp = await gydDangNap.p;
+      if(store !== GieoData.storeId()) return;
+      gydCache = { store, at: Date.now(), todayKey: inp.todayKey, kq: gydTinh(inp) };
+    }catch(err){
+      console.warn('[Gợi ý đặt] không tính được', err);
+      const b = document.getElementById('gydBox');
+      if(b) b.innerHTML = `<div class="wdg-head">${wdgHeadHTML('package', 'Gợi ý đặt hàng', 'Chưa tính được — mở lại tab để thử lại')}</div>`;
+      return;
+    }
+  }
+  gydVe();
+}
+
+const GYD_MAU = ['#2B57A8', '#12855A', '#A8690B', '#C2410C', '#7554AF', '#E23A5D', '#DB2777', '#0E7490'];
+function gydMauCua(id){ let h = 0; String(id).split('').forEach(c => { h = (h * 31 + c.charCodeAt(0)) >>> 0; }); return GYD_MAU[h % GYD_MAU.length]; }
+function gydKyHieu(name){ const w = String(name || '').trim().split(/\s+/).filter(Boolean); return ((w[0] || '?')[0] + ((w[1] || '')[0] || '')).toUpperCase(); }
+function gydNgay(k){ const d = vnDate(k + 'T00:00:00'); return String(d.getDate()).padStart(2, '0') + '/' + String(d.getMonth() + 1).padStart(2, '0'); }
+
+function gydVe(){
+  const box = document.getElementById('gydBox');
+  if(!box || !gydCache) return;
+  const kq = gydCache.kq, thu2 = _dayShift(gydCache.todayKey, kq.toiThu2), cn = _dayShift(thu2, 6);
+  const W = gydMode === 'week' || kq.toiThu2 === 0;
+  const ds = W ? kq.week : kq.day;
+  const tieuDe = W ? (kq.toiThu2 === 0 ? 'Đơn hôm nay (thứ Hai)' : `Đơn thứ Hai ${gydNgay(thu2)}`) : 'Đặt lẻ hôm nay';
+  const phu = W ? `Đủ dùng tới hết Chủ nhật ${gydNgay(cn)}` : `Món không đủ dùng tới thứ Hai ${gydNgay(thu2)}`;
+  const seg = kq.toiThu2 === 0 ? '' : `<span class="gyd-seg"><button class="${W ? 'on' : ''}" onclick="gydMode='week';gydVe()">Đơn thứ Hai</button><button class="${W ? '' : 'on'}" onclick="gydMode='day';gydVe()">Đặt lẻ hôm nay</button></span>`;
+  const hang = (x, mua) => { const c = gydMauCua(x.id);
+    return `<div class="gyd-row${mua ? '' : ' gyd-du'}" style="--mc:${c}"><span class="gyd-mk">${escapeHtmlAttr(gydKyHieu(x.name))}</span><b class="gyd-nm">${escapeHtmlAttr(x.name)}</b><span class="gyd-q">${mua ? x.packs + ' ' + escapeHtmlAttr(x.packName) : 'Đủ'}</span></div>`; };
+  box.innerHTML = `<div class="wdg-head">${wdgHeadHTML('package', tieuDe, phu, seg)}</div>
+    <div class="wdg-body">
+      <div class="gyd-grp buy">Cần mua<small>${ds.can.length}</small></div>
+      ${ds.can.length ? ds.can.map(x => hang(x, true)).join('') : '<div class="gyd-row gyd-du"><b class="gyd-nm">Không cần mua gì</b></div>'}
+      <div class="gyd-grp ok">✓ Đủ, không cần mua<small>${ds.du.length}</small></div>
+      ${ds.du.map(x => hang(x, false)).join('')}
+      ${ds.can.length ? `<div class="gyd-foot"><button class="btn outline wdg-btn" onclick="gydChep()">${ic('clipboard', 15)} Chép gửi Zalo</button><button class="btn wdg-btn" onclick="gydTaoDon()">${ic('note', 15)} Tạo đơn</button></div>` : ''}
+    </div>`;
+}
+function gydDangXem(){
+  if(!gydCache) return null;
+  const kq = gydCache.kq, W = gydMode === 'week' || kq.toiThu2 === 0;
+  return { W, kq, list: (W ? kq.week : kq.day).can };
+}
+function gydChep(){
+  const v = gydDangXem(); if(!v || !v.list.length) return;
+  const thu2 = _dayShift(gydCache.todayKey, v.kq.toiThu2);
+  const tieuDe = v.W ? `Đơn thứ Hai ${gydNgay(thu2)}` : `Đặt lẻ ${gydNgay(gydCache.todayKey)}`;
+  const st = (typeof qlActiveStores === 'function' ? qlActiveStores() : []).find(s => s.id === GieoData.storeId());
+  const txt = [tieuDe + (st && st.name ? ' — ' + st.name : ''), ...v.list.map(x => `- ${x.name}: ${x.packs} ${x.packName}`)].join('\n');
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(txt).then(() => toast('✅ Đã chép, dán vào Zalo được rồi'), () => toast('❌ Không chép được'));
+  } else toast('❌ Trình duyệt không hỗ trợ chép tự động');
+}
+function gydTaoDon(){
+  const v = gydDangXem(); if(!v || !v.list.length) return;
+  if(poDraftLines.length && !confirm('Đang có đơn soạn dở ' + poDraftLines.length + ' dòng. Thay bằng danh sách gợi ý?')) return;
+  poDraftLines = v.list.map(x => ({ itemId: x.id, qty: x.packs, unitFactor: x.factor, priceOrder: null }));
+  poOpenDraft();
+}
 function poCardHtml(po){
   const st = PO_STATUS_LABEL[po.status] || {label:po.status, color:'blue'};
   const lines = (po.lines||[]).map(l=>{

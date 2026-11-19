@@ -1,3 +1,11 @@
+# 19/11 — quanlygieo: GỢI Ý ĐẶT HÀNG (Kho ▸ Đặt hàng) — chủ dự án duyệt mẫu v5 — CHƯA deploy
+
+- Một widget `[GỢI-Ý-ĐẶT]` đầu tab Kho ▸ Đặt hàng ▸ Đơn đặt hàng, chỉ hai nhóm **Cần mua** / **Đủ, không cần mua**; nút **Đơn thứ Hai** (đặt mỗi thứ Hai, đủ dùng thứ Hai → hết Chủ nhật) / **Đặt lẻ hôm nay** (món không đủ dùng tới thứ Hai; thứ Hai chỉ có đơn tuần). Mẫu duyệt `docs/mau/mau_goi_y_dat_hang_v5.html` (v1–v4 = các vòng góp ý).
+- Chủ dự án chốt: **đặt ngày nào hàng về ngày đó**; không chia theo nhà cung cấp; dự trữ dựa trên Engine 2.
+- Tính (`gydTinh`, hàm thuần): dùng = sổ kho 28 ngày qua `_ledgerRangeRows` (bán + nấu BTP `CONSUMPTION` + `WASTE`), trung bình theo TỪNG THỨ, chỉ ngày có dùng; hôm nay = trung bình thứ − đã dùng. Dự trữ = Engine 2 `models/current` (`high` × lượng dùng) + dao động bán 90%; đơn tuần ≥ `minStock`. Có = `currentStock` + phần còn chờ của đơn `pending`/`partial`. Làm tròn lên theo đơn vị lần đặt gần nhất → đơn vị đếm kho → đơn vị gốc. Bỏ qua món ngừng dùng / không quản tồn / không dùng mà không khai tồn tối thiểu.
+- CHỈ ĐỌC. «Tạo đơn» điền `poDraftLines` rồi mở `poOpenDraft` (form cũ); «Chép gửi Zalo». Cache 5 phút / quán.
+- Kiểm: `tests/goi_y_dat_hang.test.js` (15), `tools/ql_giao_dien/e2e_goi_y_dat_hang.js` (22, 1366 / 390, chỉ đọc). Gói `giao_file/dot_19-11_goi_y_dat_hang/` (quanlygieo + _thu bản Giáng sinh, chỉ thêm so với gói 16/11).
+
 # 16/11 — manage.html: bảng «Chọn điểm bán» — TC33 / XOFA thành nút chọn (chủ dự án yêu cầu) — CHƯA deploy
 
 The cafe 33 và XOFA mỗi thương hiệu chỉ một điểm → không dựng nhóm + dòng nữa, hiện thành hai nút cùng hàng «Tất cả» / «Toàn bộ Gieo» (nút đang chọn được tô màu thương hiệu). Chỉ Gieo Gieo (nhiều điểm) giữ nhóm + dòng. Ô tìm chỉ hiện khi Gieo có > 6 điểm; tìm kiếm lọc cả nút lẫn danh sách; Enter chọn mục khớp đầu tiên. Ở Chấm công / Lương / Lịch bảng chỉ còn các nút. `setStore` và phạm vi từng tab không đổi. Kiểm: `e2e_store_dropdown.js` 38/38. Gói gộp đã dựng lại.
