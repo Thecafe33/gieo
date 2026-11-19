@@ -1,6 +1,12 @@
 # Gấu Noel 2026 — luật chơi + hướng dẫn gỡ chương trình
 
-## Bản hiện hành: `gau_noel_giangsinh.v4.js` (16/11)
+## Bản hiện hành: `gau_noel_giangsinh.v5.js` (19/11, CHƯA deploy)
+
+v4 đã deploy → v5 = v4 + **đúng 1 thay đổi** (chủ dự án chốt 19/11): phần quay **ngẫu nhiên cố định 40%** tỉ lệ gấu / lãi của quán, phần chắc trúng (ống may mắn, bill 6 ly, bed 160K, nhịp đông khách) dùng ~60% còn lại. Xác suất 1 lượt = `rho × CFG.phanRand (0,4) × lãi cặp ÷ 17K` (trần 60%). v4: `max(20%, 1 − gEst) × rho` — bắt đầu 60% rồi tụt về 20% khi chắc trúng nhiều. `gEst` vẫn được tính (không còn dùng để bốc). Dữ liệu (`kho.v4`, lượt `v: 4`) giữ nguyên — v5 chạy tiếp số liệu v4. Test `tests/gau_noel_v5.test.js`.
+
+Rà 19/11 (khách không trúng 3 ngày sau khi «lên v4»): dashboard cho thấy tỉ lệ TC33 / XOFA đứng đúng 6% (`rhoDau`, chỉ có ở ngày đầu), «tuần này» dự kiến 0,1, Gieo «chưa có bill nào từ khi đổi bản mới» → máy quầy gần như chưa chạy v4 (còn trang cũ có v3, mà v3 đã hết suất ngẫu nhiên theo chặng). Phần gắn vào 3 POS đã đối chiếu: không lỗi. Sau deploy phải tắt hẳn / xoá bộ nhớ đệm POS.
+
+## Bản trước: `gau_noel_giangsinh.v4.js` (16/11, đã deploy)
 
 Phần gắn vào app và cách gỡ chương trình **giữ nguyên như v3** (ghi chú v3 bên dưới; đọc «v3» thành «v4»). Khác v3 ở luật phát gấu:
 
